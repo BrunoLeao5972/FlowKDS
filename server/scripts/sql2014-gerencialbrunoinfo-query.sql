@@ -7,7 +7,12 @@ SELECT
       ELSE ABS(CAST(l.LancamentoID AS BIGINT)) % 1000
     END
   AS INT) AS number,
-  COALESCE(NULLIF(c.Nome, ''), 'Cliente sem cadastro') AS customerName,
+  CASE
+    WHEN l.ClienteID IS NULL OR l.ClienteID = 0 THEN ''
+    WHEN NULLIF(LTRIM(RTRIM(c.Nome)), '') IS NULL THEN ''
+    WHEN LOWER(LTRIM(RTRIM(c.Nome))) = 'geral' THEN ''
+    ELSE LTRIM(RTRIM(c.Nome))
+  END AS customerName,
   COALESCE(l.Memorando, '') AS observations,
   CAST(l.Status AS VARCHAR(20)) AS status,
   CAST(pp.Status AS VARCHAR(20)) AS itemStatus,

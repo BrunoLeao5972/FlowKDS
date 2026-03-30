@@ -339,7 +339,13 @@ function buildTicketText(payload) {
   const now = new Date();
   const dateStr = now.toLocaleString('pt-BR');
   const orderNumber = String(payload.orderNumber || '').trim() || '-';
-  const customerName = String(payload.customerName || '').trim() || '-';
+  const rawCustomerName = String(payload.customerName || '').trim();
+  const customerName = !rawCustomerName
+    || rawCustomerName.toLowerCase() === 'geral'
+    || rawCustomerName.toLowerCase() === 'cliente sem cadastro'
+    || rawCustomerName.toLowerCase() === 'cliente nao cadastrado'
+    ? 'Cliente nao cadastrado'
+    : rawCustomerName;
   const printerName = String(payload.printerName || '').trim() || 'Nao definida';
   const printSize = String(payload.printSize || '80mm').trim();
   return [
@@ -515,30 +521,33 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
 }));
 
 app.post('/print/ticket', authMiddleware, asyncHandler(async (req, res) => {
-  const mode = String(req.body?.mode || 'HTML').toUpperCase();
-  if (mode !== 'FILE') {
-    return res.json({ ok: true, mode: 'HTML' });
+  const body = req.body || {};
+  const mode = String(body.mode || 'HTML').toUpperCase();
+  const orderNumber = Number(body.orderNumber || 0);
+  const printerName = String(body.printerName || '').trim();
+
+  if (!['FILE', 'HTML', 'IMPRESSORA'].includes(mode)) {
+    return res.status(400).json({ error: 'invalid_mode' });
   }
 
-  if (process.platform !== 'win32') {
-    return res.status(400).json({ error: 'file_mode_requires_windows' });
+  if (!Number.isFinite(orderNumber) || orderNumber <= 0) {
+    return res.status(400).json({ error: 'invalid_order_number' });
   }
 
-  const content = buildTicketText(req.body || {});
-  const tempDir = path.join(os.tmpdir(), 'flow-kds-print');
-  fs.mkdirSync(tempDir, { recursive: true });
-  const fileName = `senha-${Date.now()}.txt`;
-  const filePath = path.join(tempDir, fileName);
-  fs.writeFileSync(filePath, content, 'utf8');
-
-  const child = spawn('notepad.exe', [filePath], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: false,
+  const result = await printPedido(orderNumber, printerName, mode, {
+    outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
+    customerName: String(body.customerName || ''),
   });
-  child.unref();
 
-  return res.json({ ok: true, mode: 'FILE', filePath });
+  if (!result.ok) {
+    return res.status(400).json({
+      error: 'print_failed',
+      message: result.mensagem,
+      detail: result.erroTecnico || null,
+    });
+  }
+
+  return res.json({ ok: true, mode, filePath: result.arquivoGerado || null });
 }));
 
 app.delete('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -1118,7 +1127,10 @@ app.post('/orders', asyncHandler(async (req, res) => {
         order.number,
         PRINT_PEDIDO_IMPRESSORA,
         PRINT_PEDIDO_MODO,
-        { outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined }
+        {
+          outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
+          customerName: order.customerName || '',
+        }
       );
 
       if (!printResult.ok) {

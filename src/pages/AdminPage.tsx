@@ -2,12 +2,12 @@ import { useOrders } from '@/contexts/OrderContext';
 import { Order, OrderStatus, STATUS_LABELS } from '@/types/order';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, ChefHat, CheckCircle2, Package, XCircle, Search, Plus } from 'lucide-react';
+import { Clock, ChefHat, CheckCircle2, Package, XCircle, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { NewOrderDialog } from '@/components/NewOrderDialog';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { getDisplayCustomerName } from '@/lib/customerName';
 
 const statusConfig: Record<OrderStatus, { icon: React.ElementType; colorClass: string }> = {
   received: { icon: Package, colorClass: 'bg-status-received' },
@@ -45,11 +45,9 @@ function formatItemNote(raw?: string) {
 }
 
 export default function AdminPage() {
-  const { orders, addOrder, updateStatus, cancelOrder, getOrdersByStatus, getAveragePrepTime } = useOrders();
+  const { orders, updateStatus, cancelOrder, getOrdersByStatus, getAveragePrepTime } = useOrders();
   const [filter, setFilter] = useState<OrderStatus | 'all'>('all');
   const [search, setSearch] = useState('');
-  const [showNewOrder, setShowNewOrder] = useState(false);
-  const [quickReadyNumber, setQuickReadyNumber] = useState('');
   const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [ordersPerPage, setOrdersPerPage] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
@@ -60,50 +58,6 @@ export default function AdminPage() {
     { label: 'Entregues', value: getOrdersByStatus('delivered').length, color: 'text-status-delivered', icon: Package },
     { label: 'Tempo Médio', value: `${getAveragePrepTime()}min`, color: 'text-primary', icon: Clock },
   ];
-
-  const handleQuickReady = () => {
-    const input = quickReadyNumber.trim();
-    if (!input) return;
-
-    const num = parseInt(input);
-    if (!isNaN(num)) {
-      // Buscar por número
-      const order = orders.find(o => o.number === num);
-      if (order) {
-        if (order.status !== 'ready' && order.status !== 'delivered' && order.status !== 'cancelled') {
-          updateStatus(order.id, 'ready');
-        }
-      } else {
-        // Criar novo pedido com status 'pronto' sem nome de cliente
-        addOrder({
-          number: num,
-          customerName: '',
-          items: [],
-          observations: '',
-          status: 'ready' as OrderStatus,
-        });
-      }
-    } else {
-      // Buscar por nome
-      const order = orders.find(o => o.customerName.toLowerCase() === input.toLowerCase());
-      if (order) {
-        if (order.status !== 'ready' && order.status !== 'delivered' && order.status !== 'cancelled') {
-          updateStatus(order.id, 'ready');
-        }
-      } else {
-        // Criar novo pedido com nome e número auto
-        const nextNumber = orders.length > 0 ? Math.max(...orders.map(o => o.number)) + 1 : 1;
-        addOrder({
-          number: nextNumber,
-          customerName: input,
-          items: [],
-          observations: '',
-          status: 'ready' as OrderStatus,
-        });
-      }
-    }
-    setQuickReadyNumber('');
-  };
 
   const isMobile = useIsMobile();
 
@@ -139,9 +93,6 @@ export default function AdminPage() {
           <h1 className="text-2xl md:text-3xl font-bold">Painel Administrativo</h1>
           <p className="text-muted-foreground text-sm">Gerenciamento de pedidos</p>
         </div>
-        <Button onClick={() => setShowNewOrder(true)} className="gap-2">
-          <Plus className="w-4 h-4" /> Novo Pedido
-        </Button>
       </div>
 
       {/* Stats */}
@@ -202,19 +153,6 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Quick Ready */}
-      <div className="flex gap-2 items-center">
-        <Input
-          placeholder="Número ou nome do pedido"
-          value={quickReadyNumber}
-          onChange={e => setQuickReadyNumber(e.target.value)}
-          className="max-w-xs"
-        />
-        <Button onClick={handleQuickReady} variant="outline">
-          Marcar/Adicionar pedido externo
-        </Button>
-      </div>
-
       {/* Orders List / Table (responsive) */}
       <div className="bg-card rounded-lg border border-border overflow-hidden">
         {isMobile ? (
@@ -240,7 +178,9 @@ export default function AdminPage() {
                             {STATUS_LABELS[order.status]}
                           </span>
                         </div>
-                        <p className="text-sm text-muted-foreground">{order.customerName || '-'}</p>
+                        {getDisplayCustomerName(order.customerName) && (
+                          <p className="text-sm text-muted-foreground">{getDisplayCustomerName(order.customerName)}</p>
+                        )}
                       </div>
                       <div className="text-sm text-muted-foreground">{formatTime(order.createdAt)}</div>
                     </div>
@@ -334,7 +274,7 @@ export default function AdminPage() {
                         className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
                       >
                         <td className="p-4 font-bold text-lg">{order.number}</td>
-                        <td className="p-4">{order.customerName || '-'} </td>
+                        <td className="p-4">{getDisplayCustomerName(order.customerName)}</td>
                         <td className="p-4 hidden md:table-cell">
                           <div className="flex flex-col gap-1">
                             {order.items.map(item => (
@@ -453,8 +393,6 @@ export default function AdminPage() {
           </div>
         </div>
       </div>
-
-      <NewOrderDialog open={showNewOrder} onOpenChange={setShowNewOrder} />
     </div>
   );
 }

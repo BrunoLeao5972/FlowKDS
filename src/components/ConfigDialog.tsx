@@ -5,7 +5,6 @@
  * Contém abas para:
  *   - Restaurante: dados cadastrais (nome fantasia, razão social, CNPJ, endereço detalhado) e licença.
  *   - Timer: tempos de preparo, alerta e crítico para coloração dos cards da cozinha.
- *   - Numeração: modo de numeração de pedidos (contínua, reset diário ou início personalizado).
  *   - Usuários: criação e remoção de usuários do sistema.
  *   - Permissões: controle de acesso por tela para cada usuário.
  *   - Relatórios: visualização e exportação (CSV/PDF) de indicadores operacionais.
@@ -128,7 +127,7 @@ interface OperationalReportData {
 
 export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, orderNumberMode, customStartNumber, onSave, ThemeToggle }: ConfigDialogProps) {
   // Controla qual aba está ativa na navegação principal
-  const [activeTab, setActiveTab] = useState<'times' | 'restaurant' | 'enumeration' | 'users'>('times');
+  const [activeTab, setActiveTab] = useState<'times' | 'restaurant' | 'users'>('times');
   const [timeSection, setTimeSection] = useState<'timer' | 'printer'>('timer');
 
   // Flags para os painéis que substituem o conteúdo das abas principais
@@ -661,7 +660,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
   const tabs = [
     { id: 'restaurant', label: 'Cadastro' },
     { id: 'times', label: 'Timer e Impressão' },
-    { id: 'enumeration', label: 'Numeração' },
   ] as const;
 
   /**
@@ -1054,29 +1052,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                 ) : (
                   <p className="text-xs text-muted-foreground">Nenhuma licença importada.</p>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB: NUMERAÇÃO */}
-          {!showUsersPanel && activeTab === 'enumeration' && (
-            <div className="space-y-2.5 text-sm">
-              <label className="block font-medium text-sm">Numeração de pedidos:</label>
-              <label className="flex items-center gap-2 leading-tight">
-                <input type="radio" name="orderMode" value="continuous" checked={orderMode === 'continuous'} onChange={() => setOrderMode('continuous')} />
-                <span>Contínua (padrão)</span>
-              </label>
-              <label className="flex items-center gap-2 leading-tight">
-                <input type="radio" name="orderMode" value="daily-reset" checked={orderMode === 'daily-reset'} onChange={() => setOrderMode('daily-reset')} />
-                <span>Reset diário (começa em número inicial todo dia)</span>
-              </label>
-              <label className="flex items-center gap-2 leading-tight">
-                <input type="radio" name="orderMode" value="custom-start" checked={orderMode === 'custom-start'} onChange={() => setOrderMode('custom-start')} />
-                <span>Iniciar em número personalizado</span>
-              </label>
-              <div className="mt-2 flex gap-2 items-center">
-                <label className="text-sm">Número inicial:</label>
-                <input type="number" className="input no-spinner w-24 h-8 text-sm" value={startNumber} onChange={e => setStartNumber(Number(e.target.value) || 0)} />
               </div>
             </div>
           )}

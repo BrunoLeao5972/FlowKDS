@@ -2,6 +2,7 @@ import { useOrders } from '@/contexts/OrderContext';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell } from 'lucide-react';
+import { getDisplayCustomerName } from '@/lib/customerName';
 
 export default function PublicDisplayPage() {
   const { orders } = useOrders();
@@ -50,7 +51,9 @@ export default function PublicDisplayPage() {
                   className="bg-card border border-border rounded-xl p-4 text-center"
                 >
                   <span className="text-3xl md:text-4xl font-black">{order.number}</span>
-                  <p className="text-sm text-muted-foreground mt-1">{order.customerName}</p>
+                  {getDisplayCustomerName(order.customerName) && (
+                    <p className="text-sm text-muted-foreground mt-1">{getDisplayCustomerName(order.customerName)}</p>
+                  )}
                 </motion.div>
               ))}
             </AnimatePresence>
@@ -84,7 +87,9 @@ export default function PublicDisplayPage() {
                       {order.number}
                     </span>
                   </div>
-                  <p className="text-lg font-medium mt-2">{order.customerName}</p>
+                  {getDisplayCustomerName(order.customerName) && (
+                    <p className="text-lg font-medium mt-2">{getDisplayCustomerName(order.customerName)}</p>
+                  )}
                   <p className="text-sm text-status-ready font-semibold mt-1">
                     RETIRE NO BALCÃO
                   </p>

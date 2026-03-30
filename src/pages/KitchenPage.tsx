@@ -1,6 +1,7 @@
 import { useOrders } from '@/contexts/OrderContext';
 import { useSettings } from '@/contexts/SettingsContext';
 import { Order, STATUS_LABELS } from '@/types/order';
+import { getDisplayCustomerName } from '@/lib/customerName';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
@@ -117,7 +118,9 @@ export default function KitchenPage() {
                 </div>
 
                 {/* Customer */}
-                <p className="text-sm text-muted-foreground">{order.customerName}</p>
+                {getDisplayCustomerName(order.customerName) && (
+                  <p className="text-sm text-muted-foreground">{getDisplayCustomerName(order.customerName)}</p>
+                )}
 
                 {/* Items */}
                 <div className="space-y-1.5 flex-1">

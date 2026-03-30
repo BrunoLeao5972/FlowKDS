@@ -22,11 +22,23 @@ function formatarDataHora(date) {
   return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
 }
 
-function gerarConteudoPedido(numeroPedido, dataHora = new Date()) {
+function isClienteNaoCadastrado(customerName) {
+  const normalized = String(customerName || '').trim().toLowerCase();
+  return !normalized || normalized === 'geral' || normalized === 'cliente sem cadastro' || normalized === 'cliente nao cadastrado';
+}
+
+function obterNomeClienteParaImpressao(customerName) {
+  return isClienteNaoCadastrado(customerName)
+    ? 'Cliente nao cadastrado'
+    : String(customerName).trim();
+}
+
+function gerarConteudoPedido(numeroPedido, customerName = '', dataHora = new Date()) {
   const separador = '__________________________';
   return [
     separador,
     `PEDIDO Nº: ${numeroPedido}`,
+    `CLIENTE: ${obterNomeClienteParaImpressao(customerName)}`,
     `DATA: ${formatarDataHora(dataHora)}`,
     separador,
   ].join('\r\n');
@@ -304,7 +316,7 @@ async function printPedido(numeroPedido, nomeImpressora, modoSaida, options = {}
     };
   }
 
-  const conteudo = gerarConteudoPedido(pedido, new Date());
+  const conteudo = gerarConteudoPedido(pedido, options.customerName || '', new Date());
 
   if (modo === MODOS_SAIDA.IMPRESSORA) {
     return imprimirDireto(conteudo, nomeImpressora);
@@ -319,6 +331,7 @@ module.exports = {
   MODOS_SAIDA,
   printPedido,
   gerarConteudoPedido,
+  obterNomeClienteParaImpressao,
   imprimirDireto,
   gerarArquivoTxt,
   gerarHtml,

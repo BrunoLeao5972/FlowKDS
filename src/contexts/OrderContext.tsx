@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { Order, OrderStatus } from '@/types/order';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';
+import { getDisplayCustomerName, getPrintableCustomerName } from '@/lib/customerName';
 
 interface OrderContextType {
   orders: Order[];
@@ -65,7 +66,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   const buildTicketHtml = useCallback((order: Order, resolvedPrinterName: string) => {
     const createdAt = new Date(order.createdAt);
     const dateText = createdAt.toLocaleString('pt-BR');
-    const customerName = order.customerName || '-';
+    const customerName = getPrintableCustomerName(order.customerName);
     const ticketWidth = settings.printSize === '58mm' ? 220 : settings.printSize === '80mm' ? 300 : 420;
     return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -106,10 +107,30 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     const mode = resolved.mode;
     if (mode === 'HTML') {
       const popup = window.open('', '_blank', 'noopener,noreferrer,width=420,height=700');
-      if (!popup) return;
-      popup.document.open();
-      popup.document.write(buildTicketHtml(createdOrder, resolved.printerName));
-      popup.document.close();
+      if (popup) {
+        popup.document.open();
+        popup.document.write(buildTicketHtml(createdOrder, resolved.printerName));
+        popup.document.close();
+        return;
+      }
+
+      // Fallback: se o popup estiver bloqueado, delega para o backend abrir HTML.
+      try {
+        await fetch(`${API_BASE}/print/ticket`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify({
+            mode: 'HTML',
+            printerName: resolved.printerName,
+            printSize: settings.printSize,
+            orderNumber: createdOrder.number,
+            customerName: createdOrder.customerName,
+            items: createdOrder.items,
+          }),
+        });
+      } catch (error) {
+        console.error('Falha ao enviar impressão HTML', error);
+      }
       return;
     }
 
@@ -146,6 +167,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       const created: Order = await resp.json();
       const normalized = {
         ...created,
+        customerName: getDisplayCustomerName(created.customerName),
         createdAt: new Date(created.createdAt),
         updatedAt: new Date(created.updatedAt),
         acceptedAt: created.acceptedAt ? new Date(created.acceptedAt) : undefined,
@@ -287,6 +309,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           const data: Order[] = await resp.json();
           const normalized = data.map(d => ({
             ...d,
+            customerName: getDisplayCustomerName(d.customerName),
             createdAt: new Date(d.createdAt),
             updatedAt: new Date(d.updatedAt),
             acceptedAt: d.acceptedAt ? new Date(d.acceptedAt) : undefined,
@@ -319,6 +342,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       socket.on('orders:created', (o: Order) => {
         const normalized = {
           ...o,
+          customerName: getDisplayCustomerName(o.customerName),
           createdAt: new Date(o.createdAt),
           updatedAt: new Date(o.updatedAt),
           acceptedAt: o.acceptedAt ? new Date(o.acceptedAt) : undefined,
@@ -347,6 +371,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       socket.on('orders:updated', (o: Order) => {
         const normalized = {
           ...o,
+          customerName: getDisplayCustomerName(o.customerName),
           createdAt: new Date(o.createdAt),
           updatedAt: new Date(o.updatedAt),
           acceptedAt: o.acceptedAt ? new Date(o.acceptedAt) : undefined,
