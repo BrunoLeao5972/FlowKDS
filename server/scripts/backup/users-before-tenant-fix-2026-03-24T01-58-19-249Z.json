@@ -1,0 +1,152 @@
+[
+  {
+    "_id": "69b8d55524f20bb53d6c340e",
+    "username": "bruno",
+    "passwordHash": "$2b$10$UjOUjE2Enc85/1LlCR1LcO1KfB5oKV2Ql3gKulVL8b3Nj7xLZ8S7G",
+    "createdAt": "2026-03-17T04:15:17.379Z",
+    "permissions": [
+      "admin",
+      "kitchen",
+      "display",
+      "settings",
+      "cook"
+    ]
+  },
+  {
+    "_id": "69b8da129f3852d5229245e0",
+    "username": "isadora",
+    "passwordHash": "$2b$10$xzPMm9..CLfAauZJAF160uNXAk9lHnKUrzH689MPE5PKoq01x/zh6",
+    "createdAt": "2026-03-17T04:35:30.261Z",
+    "permissions": [
+      "display",
+      "kitchen",
+      "admin",
+      "cook"
+    ]
+  },
+  {
+    "_id": "69b8da1d9f3852d5229245e5",
+    "username": "kellton",
+    "passwordHash": "$2b$10$1cXp7CN84oiUvVCjDptVMe33IFma.smGK7pQj7HUQ0SpRDzm1XOl6",
+    "createdAt": "2026-03-17T04:35:41.056Z",
+    "permissions": [
+      "kitchen",
+      "display",
+      "admin",
+      "cook"
+    ]
+  },
+  {
+    "_id": "69b8da229f3852d5229245ea",
+    "username": "lucas",
+    "passwordHash": "$2b$10$qhLVLD4FuAHg6v1MMlNW2elSlTV3qi99QLoiTTKhOYHDE5XftxV5C",
+    "createdAt": "2026-03-17T04:35:46.067Z",
+    "permissions": [
+      "kitchen",
+      "cook"
+    ]
+  },
+  {
+    "_id": "69b8da279f3852d5229245ef",
+    "username": "natanael",
+    "passwordHash": "$2b$10$VjCJ9.ZVPiFGHKCQ53b9LO6G/S2IGHnWFOZeisspr7.KivrzWtbRe",
+    "createdAt": "2026-03-17T04:35:51.377Z",
+    "permissions": [
+      "kitchen",
+      "cook"
+    ]
+  },
+  {
+    "_id": "69b8daa99f3852d5229245f7",
+    "username": "jonathas batista",
+    "passwordHash": "$2b$10$jF.NC.xw9dOq3JPOBAH5gem5gmAhol7D5UMGVWopS6eggpsrVBxAy",
+    "createdAt": "2026-03-17T04:38:01.648Z",
+    "permissions": [
+      "admin",
+      "kitchen",
+      "display",
+      "cook"
+    ]
+  },
+  {
+    "_id": "69b8dabf9f3852d5229245ff",
+    "username": "ana",
+    "passwordHash": "$2b$10$0eek0d/kdwwYEPwZGxB8JuyYxAkEIFoVmJLJl8LEcjlSz3zEDB0KC",
+    "createdAt": "2026-03-17T04:38:23.678Z",
+    "permissions": [
+      "kitchen",
+      "cook"
+    ]
+  },
+  {
+    "_id": "69b9fe817fb27be4b910b380",
+    "username": "painel",
+    "passwordHash": "$2b$10$cJv2/l7K4shwmjbEhpraDeSZygV6V2J6hUORqr3X.YuYFBC5Y3oIO",
+    "permissions": [
+      "display",
+      "cook"
+    ],
+    "createdAt": "2026-03-18T01:23:13.915Z"
+  },
+  {
+    "_id": "69b9ff907fb27be4b910b3e2",
+    "username": "raul vale",
+    "passwordHash": "$2b$10$gPMa1VM3K/NpAP3mbaV6bOeWZGSprOs1RGdDUZoeA.Eow5g1Gdjwq",
+    "permissions": [
+      "admin",
+      "kitchen",
+      "display",
+      "cook"
+    ],
+    "createdAt": "2026-03-18T01:27:44.617Z"
+  },
+  {
+    "_id": "69b9ff977fb27be4b910b3e7",
+    "username": "ricardy",
+    "passwordHash": "$2b$10$l7xv/A.o/0DhV.C9P8cR8OP3QQtwEs93TdJIGNGlXkT8g4LhuGjuu",
+    "permissions": [
+      "admin",
+      "kitchen",
+      "display",
+      "cook"
+    ],
+    "createdAt": "2026-03-18T01:27:51.017Z"
+  },
+  {
+    "_id": "69b9ff9b7fb27be4b910b3ec",
+    "username": "rafael",
+    "passwordHash": "$2b$10$ZqegGIWAH89Dvym9WB0qmuxHj4hwxaA1VYRIsp.W2DrO/OMcSgYsi",
+    "permissions": [
+      "admin",
+      "kitchen",
+      "display",
+      "cook"
+    ],
+    "createdAt": "2026-03-18T01:27:55.317Z"
+  },
+  {
+    "_id": "69ba037aa10a608c5eba5e0e",
+    "username": "vini",
+    "passwordHash": "$2b$10$YX9JWxzP1UB1MwVxgm39bO2n7pj3EiYQNVkNmp.UzBDpfw1GSTbJi",
+    "permissions": [
+      "admin",
+      "kitchen",
+      "display",
+      "cook"
+    ],
+    "createdAt": "2026-03-18T01:44:26.252Z"
+  },
+  {
+    "_id": "69c1b1c8effce45d4337bdb9",
+    "tenantId": "legacy",
+    "username": "eric",
+    "passwordHash": "$2b$10$gtS2ouckUJjBm2hdAdbMtO1QDJ7fRC3TifjLdakadXdPeXK1p7ZHC",
+    "permissions": [
+      "admin",
+      "kitchen",
+      "display",
+      "cook"
+    ],
+    "createdAt": "2026-03-23T21:34:00.068Z"
+  }
+]

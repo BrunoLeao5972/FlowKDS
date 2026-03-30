@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: kitchen-flow
+    env: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install; npm install --prefix server; npm run build
+    startCommand: npm start --prefix server
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: AUTH_USERNAME
+        sync: false
+      - key: AUTH_PASSWORD
+        sync: false
+      - key: MONGODB_URI
+        sync: false

@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light theme (default) */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 47.4% 11.2%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+
+    --primary: 25 95% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 15% 96%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 14% 96%;
+    --muted-foreground: 215 15% 45%;
+
+    --accent: 25 90% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 15% 90%;
+    --input: 215 15% 96%;
+    --ring: 25 95% 55%;
+
+    --radius: 0.75rem;
+
+    /* KDS Status Colors */
+    --status-received: 210 80% 55%;
+    --status-preparing: 35 95% 55%;
+    --status-ready: 145 70% 45%;
+    --status-delivered: 220 15% 35%;
+    --status-cancelled: 0 72% 51%;
+
+    /* Timer Colors */
+    --timer-ok: 145 70% 45%;
+    --timer-warning: 45 95% 55%;
+    --timer-danger: 0 72% 55%;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222.2 47.4% 11.2%;
+    --sidebar-primary: 25 95% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 14% 96%;
+    --sidebar-accent-foreground: 222.2 47.4% 11.2%;
+    --sidebar-border: 215 15% 90%;
+    --sidebar-ring: 25 95% 55%;
+  }
+
+  /* Dark theme overrides */
+  .dark {
+    --background: 220 20% 10%;
+    --foreground: 210 20% 95%;
+
+    --card: 220 18% 14%;
+    --card-foreground: 210 20% 95%;
+
+    --popover: 220 18% 14%;
+    --popover-foreground: 210 20% 95%;
+
+    --primary: 25 95% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 15% 20%;
+    --secondary-foreground: 210 20% 90%;
+
+    --muted: 220 15% 18%;
+    --muted-foreground: 215 15% 55%;
+
+    --accent: 25 90% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 25 95% 55%;
+
+    --radius: 0.75rem;
+
+    /* KDS Status Colors */
+    --status-received: 210 80% 55%;
+    --status-preparing: 35 95% 55%;
+    --status-ready: 145 70% 45%;
+    --status-delivered: 220 15% 35%;
+    --status-cancelled: 0 72% 51%;
+
+    /* Timer Colors */
+    --timer-ok: 145 70% 45%;
+    --timer-warning: 45 95% 55%;
+    --timer-danger: 0 72% 55%;
+
+    /* Sidebar */
+    --sidebar-background: 220 20% 8%;
+    --sidebar-foreground: 210 20% 90%;
+    --sidebar-primary: 25 95% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 15% 16%;
+    --sidebar-accent-foreground: 210 20% 90%;
+    --sidebar-border: 220 15% 18%;
+    --sidebar-ring: 25 95% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+/* Pulse animation for ready orders */
+@keyframes pulse-ready {
+  0%, 100% { box-shadow: 0 0 0 0 hsla(var(--status-ready), 0.4); }
+  50% { box-shadow: 0 0 0 12px hsla(var(--status-ready), 0); }
+}
+
+.animate-pulse-ready {
+  animation: pulse-ready 2s ease-in-out infinite;
+}
+
+/* Remove spinner arrows from numeric inputs (Chromium/WebKit and Firefox) */
+.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

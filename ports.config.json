@@ -1,0 +1,4 @@
+{
+  "frontendPort": 8082,
+  "backendPort": 8081
+}
