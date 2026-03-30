@@ -4,7 +4,8 @@ const cors = require('cors');
 const morgan = require('morgan');
 const crypto = require('crypto');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
+const RUNTIME_DIR = process.pkg ? path.dirname(process.execPath) : __dirname;
+require('dotenv').config({ path: path.join(RUNTIME_DIR, '.env') });
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
@@ -537,6 +538,8 @@ app.post('/print/ticket', authMiddleware, asyncHandler(async (req, res) => {
   const result = await printPedido(orderNumber, printerName, mode, {
     outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
     customerName: String(body.customerName || ''),
+    tradeName: String(body.tradeName || ''),
+    items: Array.isArray(body.items) ? body.items : [],
   });
 
   if (!result.ok) {
@@ -1078,7 +1081,9 @@ app.get('/reports/operational', authMiddleware, asyncHandler(async (req, res) =>
 }));
 
 // Publica o build do frontend quando existir (modo produção).
-const DIST = path.resolve(__dirname, '../dist');
+const DIST = process.pkg
+  ? path.join(RUNTIME_DIR, 'dist')
+  : path.resolve(__dirname, '../dist');
 if (fs.existsSync(DIST)) {
   app.use(express.static(DIST));
   app.get('*', (req, res) => {

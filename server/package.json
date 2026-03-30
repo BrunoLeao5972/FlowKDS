@@ -8,10 +8,12 @@
     "dev": "node index.js",
     "dev:watch": "nodemon index.js",
     "test:db": "node scripts/test-db-connection.js",
-    "bridge:sql2014": "node scripts/sql2014-kds-bridge.js"
+    "bridge:sql2014": "node scripts/sql2014-kds-bridge.js",
+    "pack:server": "pkg index.js --targets node18-win-x64 --output ../release/kds-server.exe",
+    "pack:bridge": "pkg scripts/sql2014-kds-bridge.js --targets node18-win-x64 --output ../release/kds-bridge.exe"
   },
   "dependencies": {
-    "bcrypt": "^6.0.0",
+    "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
@@ -24,6 +26,7 @@
     "socket.io": "^4.7.2"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "nodemon": "^2.0.22",
+    "pkg": "^5.8.1"
   }
 }

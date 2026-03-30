@@ -2,7 +2,7 @@ import { useOrders } from '@/contexts/OrderContext';
 import { Order, OrderStatus, STATUS_LABELS } from '@/types/order';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, ChefHat, CheckCircle2, Package, XCircle, Search } from 'lucide-react';
+import { Clock, ChefHat, CheckCircle2, Package, XCircle, Search, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -45,7 +45,7 @@ function formatItemNote(raw?: string) {
 }
 
 export default function AdminPage() {
-  const { orders, updateStatus, cancelOrder, getOrdersByStatus, getAveragePrepTime } = useOrders();
+  const { orders, updateStatus, cancelOrder, getOrdersByStatus, getAveragePrepTime, reprintOrderTicket } = useOrders();
   const [filter, setFilter] = useState<OrderStatus | 'all'>('all');
   const [search, setSearch] = useState('');
   const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
@@ -353,6 +353,14 @@ export default function AdminPage() {
                                 Voltar para produção
                               </Button>
                             )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="Reimprimir senha do pedido"
+                              onClick={() => reprintOrderTicket(order)}
+                            >
+                              <Printer className="w-4 h-4" />
+                            </Button>
                           </div>
                         </td>
                       </motion.tr>

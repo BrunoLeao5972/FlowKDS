@@ -1,10 +1,13 @@
-require('dotenv').config();
 const fs = require('fs/promises');
 const fsSync = require('fs');
 const path = require('path');
 const sql = require('mssql');
 
-const PID_FILE = path.resolve(__dirname, '.sql2014-bridge.pid');
+const RUNTIME_DIR = process.pkg ? path.join(path.dirname(process.execPath), 'scripts') : __dirname;
+const ENV_PATH = process.pkg ? path.join(path.dirname(process.execPath), '.env') : path.join(__dirname, '..', '.env');
+require('dotenv').config({ path: ENV_PATH });
+
+const PID_FILE = path.resolve(RUNTIME_DIR, '.sql2014-bridge.pid');
 
 function acquireLock() {
   if (fsSync.existsSync(PID_FILE)) {
@@ -25,9 +28,9 @@ function releaseLock() {
 }
 
 const POLL_INTERVAL_MS = Number(process.env.SQL2014_POLL_INTERVAL_MS || 3000);
-const STATE_FILE = path.resolve(__dirname, process.env.SQL2014_STATE_FILE || '.sql2014-bridge-state.json');
+const STATE_FILE = path.resolve(RUNTIME_DIR, process.env.SQL2014_STATE_FILE || '.sql2014-bridge-state.json');
 const KDS_API_BASE = String(process.env.KDS_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
-const SQL_QUERY_FILE = process.env.SQL2014_QUERY_FILE ? path.resolve(__dirname, process.env.SQL2014_QUERY_FILE) : null;
+const SQL_QUERY_FILE = process.env.SQL2014_QUERY_FILE ? path.resolve(RUNTIME_DIR, process.env.SQL2014_QUERY_FILE) : null;
 const SQL_QUERY = process.env.SQL2014_QUERY || '';
 const SQL_STATUS_MODE = String(process.env.SQL2014_STATUS_MODE || 'parity').trim().toLowerCase();
 

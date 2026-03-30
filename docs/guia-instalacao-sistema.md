@@ -252,3 +252,40 @@ Remove-Item .\server\scripts\.sql2014-bridge.pid -ErrorAction SilentlyContinue
 - `server/scripts/sql2014-gerencialbrunoinfo-query.sql`
 - `server/scripts/.sql2014-bridge-state.json`
 - `server/services/pedidoPrinter.js`
+
+## 13. Distribuicao protegida (sem expor codigo-fonte)
+
+Para entregar ao cliente local sem enviar o fonte completo, use o pipeline de release:
+
+```powershell
+npm run release:protected
+```
+
+Isso gera a pasta `release/` com:
+- `kds-server.exe` (backend empacotado)
+- `kds-bridge.exe` (integracao SQL empacotada)
+- `dist/` (frontend compilado)
+- `scripts/*.sql` (queries do bridge)
+- `.env.example`
+- `start-server.cmd`, `start-bridge.cmd`, `start-all.cmd`
+
+Passos no cliente:
+1. Copiar apenas a pasta `release/`.
+2. Criar `.env` a partir de `.env.example` na raiz da pasta `release`.
+3. Ajustar variaveis do ambiente (`MONGODB_URI`, SQL2014_*, etc.).
+4. Iniciar com `start-all.cmd` (ou separado).
+
+Se o `.env` nao existir, os scripts `start-*.cmd` agora criam automaticamente o arquivo a partir de `.env.example`, mostram instrucoes e pausam para edicao.
+
+### EXE abre e fecha na hora (release)
+
+As causas mais comuns sao configuracao ausente ou invalida no `.env`:
+- `kds-server.exe`: `MONGODB_URI` ausente/invalido ou MongoDB desligado.
+- `kds-bridge.exe`: `SQL2014_USER`, `SQL2014_PASSWORD` ou `SQL2014_DATABASE` ausentes.
+
+Use `start-server.cmd` e `start-bridge.cmd` (nao clique direto no `.exe`) para ver a mensagem de erro e manter a janela aberta.
+
+Observacoes de seguranca:
+- Nao enviar pasta `src/`, `server/` e `.git` para cliente.
+- O frontend ja sai minificado e sem source map no build de producao.
+- Ainda assim, software local nunca e 100% inviolavel; esse fluxo apenas dificulta engenharia reversa.

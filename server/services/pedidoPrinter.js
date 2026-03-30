@@ -33,15 +33,21 @@ function obterNomeClienteParaImpressao(customerName) {
     : String(customerName).trim();
 }
 
-function gerarConteudoPedido(numeroPedido, customerName = '', dataHora = new Date()) {
+function gerarConteudoPedido(numeroPedido, customerName = '', dataHora = new Date(), tradeName = '') {
   const separador = '__________________________';
-  return [
+  const lines = [];
+  if (tradeName && String(tradeName).trim()) {
+    lines.push(String(tradeName).trim());
+  }
+  lines.push(
     separador,
-    `PEDIDO Nº: ${numeroPedido}`,
+    `PEDIDO N\u00ba: ${numeroPedido}`,
     `CLIENTE: ${obterNomeClienteParaImpressao(customerName)}`,
     `DATA: ${formatarDataHora(dataHora)}`,
     separador,
-  ].join('\r\n');
+    'solucaosistemas.net'
+  );
+  return lines.join('\r\n');
 }
 
 function escapePowerShellSingleQuote(value) {
@@ -243,55 +249,72 @@ async function gerarArquivoTxt(conteudo, numeroPedido, customOutputDir) {
   }
 }
 
-async function gerarHtml(conteudo, numeroPedido, customOutputDir) {
-  try {
-    const pasta = obterPastaSaida(customOutputDir);
-    await fs.mkdir(pasta, { recursive: true });
+async function gerarHtml(numeroPedido, options, customOutputDir) {
+  const tradeName    = String(options.tradeName   || '').trim();
+  const customerName = obterNomeClienteParaImpressao(options.customerName || '');
+  const items        = Array.isArray(options.items) ? options.items : [];
+  const dataHora     = formatarDataHora(options.dataHora || new Date());
 
-    const arquivo = path.join(
-      pasta,
-      `pedido-${numeroPedido}-${new Date().toISOString().replace(/[:.]/g, '-')}.html`
-    );
-
-    const conteudoSeguro = String(conteudo || '')
+  function esc(str) {
+    return String(str || '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
 
-    const html = [
-      '<!doctype html>',
-      '<html lang="pt-BR">',
-      '<head>',
-      '  <meta charset="utf-8" />',
-      '  <meta name="viewport" content="width=device-width, initial-scale=1" />',
-      `  <title>Senha do Pedido ${numeroPedido}</title>`,
-      '  <style>',
-      '    body { font-family: Consolas, Courier New, monospace; margin: 24px; }',
-      '    .ticket { border: 1px dashed #333; padding: 12px; width: 320px; white-space: pre-wrap; }',
-      '  </style>',
-      '</head>',
-      '<body>',
-      `  <div class="ticket">${conteudoSeguro}</div>`,
-      '</body>',
-      '</html>',
-    ].join('\r\n');
+  const itemsHtml = items.length
+    ? items.map(i => `<div class="item">${esc(i.quantity || 1)}x ${esc(i.name)}${i.notes ? ` <span class="obs">(${esc(i.notes)})</span>` : ''}</div>`).join('\n')
+    : '';
 
+  const html = `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Senha do Pedido ${numeroPedido}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+    .ticket { background: #fff; border: 1px dashed #555; border-radius: 4px; padding: 16px; width: 320px; }
+    .trade-name { text-align: center; font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+    .divider { border: none; border-top: 1px dashed #aaa; margin: 10px 0; }
+    .label-senha { text-align: center; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+    .senha { text-align: center; font-size: 52px; font-weight: 900; margin: 4px 0 10px; }
+    .info-line { font-size: 13px; margin: 4px 0; }
+    .info-line strong { font-weight: 600; }
+    .items-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin: 8px 0 4px; }
+    .item { font-size: 13px; margin: 3px 0; }
+    .obs { color: #888; font-size: 11px; }
+    .footer { margin-top: 12px; text-align: center; font-size: 12px; color: #888; }
+    @media print { body { background: none; padding: 0; } .ticket { border: none; width: auto; } }
+  </style>
+</head>
+<body>
+  <div class="ticket">
+    ${tradeName ? `<div class="trade-name">${esc(tradeName)}</div>` : ''}
+    <hr class="divider" />
+    <div class="label-senha">Senha do Pedido</div>
+    <div class="senha">${numeroPedido}</div>
+    <hr class="divider" />
+    <div class="info-line"><strong>Cliente:</strong> ${esc(customerName)}</div>
+    <div class="info-line"><strong>Data/Hora:</strong> ${esc(dataHora)}</div>
+    ${itemsHtml ? `<div class="items-title">Itens</div>\n    ${itemsHtml}` : ''}
+    <hr class="divider" />
+    <div class="footer">solucaosistemas.net</div>
+  </div>
+  <script>window.print();</script>
+</body>
+</html>`;
+
+  try {
+    const pasta = obterPastaSaida(customOutputDir);
+    await fs.mkdir(pasta, { recursive: true });
+    const arquivo = path.join(pasta, `pedido-${numeroPedido}-${new Date().toISOString().replace(/[:.]/g, '-')}.html`);
     await fs.writeFile(arquivo, html, 'utf8');
     await abrirNoNavegadorPadrao(arquivo);
-
-    return {
-      ok: true,
-      mensagem: 'Arquivo HTML gerado e aberto no navegador padrao.',
-      arquivoGerado: arquivo,
-      erroTecnico: null,
-    };
+    return { ok: true, mensagem: 'Arquivo HTML gerado e aberto no navegador padrao.', arquivoGerado: arquivo, erroTecnico: null };
   } catch (error) {
-    return {
-      ok: false,
-      mensagem: 'Erro ao gerar ou abrir arquivo HTML.',
-      arquivoGerado: null,
-      erroTecnico: error?.message || String(error),
-    };
+    return { ok: false, mensagem: 'Erro ao gerar ou abrir arquivo HTML.', arquivoGerado: null, erroTecnico: error?.message || String(error) };
   }
 }
 
@@ -316,7 +339,7 @@ async function printPedido(numeroPedido, nomeImpressora, modoSaida, options = {}
     };
   }
 
-  const conteudo = gerarConteudoPedido(pedido, options.customerName || '', new Date());
+  const conteudo = gerarConteudoPedido(pedido, options.customerName || '', new Date(), options.tradeName || '');
 
   if (modo === MODOS_SAIDA.IMPRESSORA) {
     return imprimirDireto(conteudo, nomeImpressora);
@@ -324,7 +347,12 @@ async function printPedido(numeroPedido, nomeImpressora, modoSaida, options = {}
   if (modo === MODOS_SAIDA.FILE) {
     return gerarArquivoTxt(conteudo, pedido, options.outputDir);
   }
-  return gerarHtml(conteudo, pedido, options.outputDir);
+  return gerarHtml(pedido, {
+    tradeName:    options.tradeName    || '',
+    customerName: options.customerName || '',
+    items:        Array.isArray(options.items) ? options.items : [],
+    dataHora:     new Date(),
+  }, options.outputDir);
 }
 
 module.exports = {

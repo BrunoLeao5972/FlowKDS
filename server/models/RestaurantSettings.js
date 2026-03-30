@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const restaurantSettingsSchema = new mongoose.Schema(
   {
-    tenantId: { type: String, required: true, default: 'legacy', index: true },
+    tenantId: { type: String, required: true, default: 'legacy' },
     tradeName: { type: String, default: '' },
     legalName: { type: String, default: '' },
     cnpj: { type: String, default: '' },

@@ -13,6 +13,8 @@ interface OrderContextType {
   acknowledgeCancelledOrder: (id: string) => void;
   getOrdersByStatus: (status: OrderStatus) => Order[];
   getAveragePrepTime: () => number;
+  printOrderTicket: (order: Order) => Promise<void>;
+  reprintOrderTicket: (order: Order) => Promise<void>;
 }
 
 const OrderContext = createContext<OrderContextType | null>(null);
@@ -68,6 +70,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     const dateText = createdAt.toLocaleString('pt-BR');
     const customerName = getPrintableCustomerName(order.customerName);
     const ticketWidth = settings.printSize === '58mm' ? 220 : settings.printSize === '80mm' ? 300 : 420;
+    const tradeName = settings.restaurantTradeName ? String(settings.restaurantTradeName).trim() : '';
     return `<!DOCTYPE html>
 <html lang="pt-BR">
   <head>
@@ -76,31 +79,33 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     <style>
       body { font-family: Arial, sans-serif; margin: 0; padding: 16px; }
       .ticket { width: ${ticketWidth}px; border: 1px dashed #999; padding: 12px; }
-      .title { text-align: center; font-weight: 700; margin-bottom: 10px; }
+      .trade-name { text-align: center; font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+      .title { text-align: center; font-size: 12px; color: #666; margin-bottom: 10px; }
       .senha { text-align: center; font-size: 48px; font-weight: 700; margin: 8px 0; }
       .line { margin: 6px 0; font-size: 14px; }
       .items { margin-top: 10px; border-top: 1px dashed #bbb; padding-top: 8px; }
+      .footer { margin-top: 12px; border-top: 1px dashed #bbb; padding-top: 8px; text-align: center; font-size: 12px; color: #888; }
       .hint { margin-top: 10px; font-size: 12px; color: #666; }
       @media print { body { padding: 0; } .ticket { border: none; width: auto; } .hint { display: none; } }
     </style>
   </head>
   <body>
     <div class="ticket">
-      <div class="title">FLOW KDS - SENHA</div>
+      ${tradeName ? `<div class="trade-name">${tradeName}</div>` : ''}
+      <div class="title">SENHA DO PEDIDO</div>
       <div class="senha">${order.number}</div>
       <div class="line"><strong>Cliente:</strong> ${customerName}</div>
       <div class="line"><strong>Data/Hora:</strong> ${dateText}</div>
-      <div class="line"><strong>Impressora:</strong> ${resolvedPrinterName || 'Nao definida'}</div>
-      <div class="line"><strong>Tamanho:</strong> ${settings.printSize}</div>
       <div class="items">
         ${order.items.map(item => `<div class="line">${item.quantity}x ${item.name}</div>`).join('') || '<div class="line">Sem itens</div>'}
       </div>
+      <div class="footer">solucaosistemas.net</div>
       <div class="hint">Use Ctrl+P para imprimir.</div>
     </div>
     <script>window.print();</script>
   </body>
 </html>`;
-  }, [settings.printSize]);
+  }, [settings.printSize, settings.restaurantTradeName]);
 
   const printOrderTicket = useCallback(async (createdOrder: Order) => {
     const resolved = resolvePrinterMode(settings.printerName || '');
@@ -125,6 +130,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             printSize: settings.printSize,
             orderNumber: createdOrder.number,
             customerName: createdOrder.customerName,
+            tradeName: settings.restaurantTradeName || '',
             items: createdOrder.items,
           }),
         });
@@ -144,13 +150,35 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           printSize: settings.printSize,
           orderNumber: createdOrder.number,
           customerName: createdOrder.customerName,
+          tradeName: settings.restaurantTradeName || '',
           items: createdOrder.items,
         }),
       });
     } catch (error) {
       console.error('Falha ao enviar impressão FILE', error);
     }
-  }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printSize]);
+  }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printSize, settings.restaurantTradeName]);
+
+  const reprintOrderTicket = useCallback(async (order: Order) => {
+    const resolved = resolvePrinterMode(settings.printerName || '');
+    try {
+      await fetch(`${API_BASE}/print/ticket`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          mode: resolved.mode,
+          printerName: resolved.printerName,
+          printSize: settings.printSize,
+          orderNumber: order.number,
+          customerName: order.customerName,
+          tradeName: settings.restaurantTradeName || '',
+          items: order.items,
+        }),
+      });
+    } catch (error) {
+      console.error('Falha ao reimprimir ticket', error);
+    }
+  }, [API_BASE, authHeaders, resolvePrinterMode, settings.printerName, settings.printSize, settings.restaurantTradeName]);
 
   const addOrder = useCallback(async (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
@@ -413,7 +441,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [API_BASE, authHeaders, isAuthenticated, logout, settings, token]);
 
   return (
-    <OrderContext.Provider value={{ orders, addOrder, updateStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime }}>
+    <OrderContext.Provider value={{ orders, addOrder, updateStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime, printOrderTicket, reprintOrderTicket }}>
       {children}
     </OrderContext.Provider>
   );
