@@ -1058,7 +1058,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
             </div>
           )}
 
-          TAB: NUMERAÇÃO
+          {/* TAB: NUMERAÇÃO */}
           {!showUsersPanel && activeTab === 'enumeration' && (
             <div className="space-y-2.5 text-sm">
               <label className="block font-medium text-sm">Numeração de pedidos:</label>
