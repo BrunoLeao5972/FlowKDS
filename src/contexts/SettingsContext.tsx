@@ -51,6 +51,9 @@ type Settings = {
   setPrintScale: (scale: number) => void;
   setOrderNumberMode: (m: OrderNumberMode) => void;
   setCustomStartNumber: (n: number) => void;
+  // kitchen animations toggle
+  animationsEnabled: boolean;
+  setAnimationsEnabled: (v: boolean) => void;
   // helper: compute next order number given current orders
   computeNextNumber: (orders: Array<{ number: number; createdAt?: string | number | Date }>) => number;
   // allow manual reset (updates lastResetDate)
@@ -106,6 +109,8 @@ const defaultValues: Settings = {
   setPrintScale: () => {},
   setOrderNumberMode: () => {},
   setCustomStartNumber: () => {},
+  animationsEnabled: true,
+  setAnimationsEnabled: () => {},
   computeNextNumber: () => 101,
   touchResetDate: () => {},
 };
@@ -149,6 +154,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [orderNumberMode, setOrderNumberMode] = useState<OrderNumberMode>(defaultValues.orderNumberMode);
   const [customStartNumber, setCustomStartNumber] = useState<number>(defaultValues.customStartNumber);
   const [lastResetDate, setLastResetDate] = useState<string | null>(defaultValues.lastResetDate);
+  const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(true);
 
   // persist/load
   useEffect(() => {
@@ -363,6 +369,8 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         setLicenseContent,
         setOrderNumberMode,
         setCustomStartNumber,
+        animationsEnabled,
+        setAnimationsEnabled,
         computeNextNumber,
         touchResetDate,
       }}

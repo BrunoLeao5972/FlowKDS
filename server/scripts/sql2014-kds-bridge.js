@@ -127,11 +127,16 @@ function lowerCaseKeys(row) {
 function parseItems(itemsRaw) {
   if (Array.isArray(itemsRaw)) {
     return itemsRaw
-      .map(item => ({
-        name: String(item?.name || '').trim(),
-        quantity: Number(item?.quantity || 1),
-        notes: String(item?.notes || ''),
-      }))
+      .map(item => {
+        const rawSector = item?.sectorId ?? item?.sectorid ?? item?.setorId ?? item?.setorid ?? item?.setor;
+        const sectorNormalized = rawSector != null ? String(rawSector).trim() : '';
+        return {
+          name: String(item?.name || '').trim(),
+          quantity: Number(item?.quantity || 1),
+          notes: String(item?.notes || ''),
+          sectorId: sectorNormalized || null,
+        };
+      })
       .filter(item => item.name);
   }
 
@@ -161,11 +166,14 @@ function parseItemFromFlatRow(row) {
   const quantityRaw = row.itemquantity ?? row.qde ?? row.quantity;
   const quantityNumber = Number(quantityRaw || 1);
 
+  const rawSector = row.sectorid ?? row.setorid ?? row.setor;
+  const sectorNormalized = rawSector != null ? String(rawSector).trim() : '';
+
   return {
     name,
     quantity: Number.isFinite(quantityNumber) && quantityNumber > 0 ? quantityNumber : 1,
     notes: String(row.itemnotes ?? row.observacoes ?? row.notes ?? ''),
-    sectorId: row.sectorid != null ? String(row.sectorid).trim() : null,
+    sectorId: sectorNormalized || null,
   };
 }
 

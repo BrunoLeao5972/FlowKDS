@@ -60,7 +60,7 @@ interface UserData {
   _id: string;
   username: string;
   createdAt: string;
-  /** Lista de permissões: admin | kitchen | display | settings | cook */
+  /** Lista de permissões: admin | kitchen | display | settings */
   permissions: string[];
   /** IDs de setores permitidos para o usuário aceitar/preparar pedidos. */
   sectorIds: string[];
@@ -325,7 +325,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
         _id: u._id || u.id,
         username: u.username,
         createdAt: u.createdAt,
-        permissions: u.permissions || ['admin', 'kitchen', 'display', 'settings', 'cook'],
+        permissions: u.permissions || ['admin', 'kitchen', 'display', 'settings'],
         sectorIds: Array.isArray(u.sectorIds) ? u.sectorIds.map((s: any) => String(s)) : [],
       }));
       setUsers(normalized);
@@ -650,7 +650,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
         _id: newUser._id || newUser.id,
         username: newUser.username,
         createdAt: newUser.createdAt,
-        permissions: newUser.permissions || ['admin', 'kitchen', 'display', 'settings', 'cook'],
+        permissions: newUser.permissions || ['admin', 'kitchen', 'display', 'settings'],
         sectorIds: Array.isArray(newUser.sectorIds) ? newUser.sectorIds.map((s: any) => String(s)) : [],
       };
       setUsers(prev => [...prev, normalizedNewUser]);
@@ -997,12 +997,30 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {!showUsersPanel && activeTab === 'restaurant' && (
             <div className="space-y-3 max-w-xl">
-              <div className="rounded-md border border-border p-3 bg-muted/20">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <p className="text-sm font-medium">Tema do sistema</p>
-                  </div>
+              <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Tema do sistema</p>
                   <div className="shrink-0">{ThemeToggle}</div>
+                </div>
+                <div className="border-t border-border/60" />
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium">Animações de alerta</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Cards críticos piscam em vermelho para chamar atenção</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => settings.setAnimationsEnabled(!settings.animationsEnabled)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      settings.animationsEnabled ? 'bg-primary' : 'bg-muted-foreground/30'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        settings.animationsEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
                 </div>
               </div>
 
@@ -1182,27 +1200,27 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                 <p className="text-sm text-muted-foreground">Nenhum usuário cadastrado.</p>
               ) : (
                 <div className="space-y-1.5">
-                  <div className="grid grid-cols-6 gap-2 text-xs font-medium text-muted-foreground px-2 pb-1 border-b">
-                    <span>Usuário</span>
-                    <span className="text-center">Admin</span>
-                    <span className="text-center">Cozinha</span>
-                    <span className="text-center">Painel</span>
-                    <span className="text-center">Config.</span>
-                    <span className="text-center">Cozinheiro</span>
-                  </div>
                   {paginatedPermUsers.map(user => (
                     <div key={user._id} className="bg-muted/50 px-2 py-2.5 rounded-md space-y-2">
-                      <div className="grid grid-cols-6 gap-2 items-center">
+                      <div className="grid grid-cols-5 gap-2 items-start">
                         <span className="text-sm font-medium truncate">{formatDisplayName(user.username)}</span>
-                        {(['admin', 'kitchen', 'display', 'settings', 'cook'] as const).map(perm => (
-                          <label key={perm} className="flex justify-center cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="w-4 h-4 accent-orange-500"
-                              checked={user.permissions.includes(perm)}
-                              onChange={() => handleTogglePermission(user._id, perm, user.permissions)}
-                            />
-                          </label>
+                        {([
+                          { key: 'admin', label: 'Admin' },
+                          { key: 'kitchen', label: 'Cozinha' },
+                          { key: 'display', label: 'Painel' },
+                          { key: 'settings', label: 'Config.' },
+                        ] as const).map(perm => (
+                          <div key={perm.key} className="flex flex-col items-center gap-1">
+                            <span className="text-[11px] font-medium text-muted-foreground text-center leading-tight">{perm.label}</span>
+                            <label className="flex justify-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="w-4 h-4 accent-orange-500"
+                                checked={user.permissions.includes(perm.key)}
+                                onChange={() => handleTogglePermission(user._id, perm.key, user.permissions)}
+                              />
+                            </label>
+                          </div>
                         ))}
                       </div>
 

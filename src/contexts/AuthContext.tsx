@@ -15,7 +15,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const STORAGE_TOKEN = 'kds_auth_token';
 const STORAGE_USER = 'kds_auth_user';
 const STORAGE_PERMISSIONS = 'kds_auth_permissions';
-const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings', 'cook'];
+const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings'];
 
 function getApiBase() {
   if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE;

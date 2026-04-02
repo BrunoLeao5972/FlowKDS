@@ -47,29 +47,6 @@ function Timer({ startTime, colorClass }: { startTime: Date; colorClass: string 
   );
 }
 
-/** Ícone de status do item individual (somente ícone, sem texto). */
-function ItemStatusBadge({ status }: { status?: ItemStatus }) {
-  if (status === 'ready') {
-    return (
-      <span title="Pronto" className="inline-flex items-center justify-center w-6 h-6 rounded border bg-status-ready/20 text-status-ready border-status-ready/40">
-        <CheckCircle2 className="w-3.5 h-3.5" />
-      </span>
-    );
-  }
-  if (status === 'preparing') {
-    return (
-      <span title="Em preparo" className="inline-flex items-center justify-center w-6 h-6 rounded border bg-status-preparing/20 text-status-preparing border-status-preparing/40">
-        <ChefHat className="w-3.5 h-3.5" />
-      </span>
-    );
-  }
-  return (
-    <span title="Aguardando" className="inline-flex items-center justify-center w-6 h-6 rounded border bg-muted text-muted-foreground border-border">
-      <Clock className="w-3.5 h-3.5" />
-    </span>
-  );
-}
-
 /** Botão de toggle de status por item (visão de comanda completa e setores). */
 function ItemStatusToggle({
   item,
@@ -107,7 +84,7 @@ function ItemStatusToggle({
 export default function KitchenPage() {
   const { orders, sectors, updateStatus, updateItemStatus, acknowledgeCancelledOrder } = useOrders();
   const { username } = useAuth();
-  const { tempoAlerta, tempoCritico } = useSettings();
+  const { tempoAlerta, tempoCritico, animationsEnabled } = useSettings();
   const [, setTick] = useState(0);
   // 'all' = Comanda Completa; qualquer outro valor = sectorId
   const [activeTab, setActiveTab] = useState<'all' | string>('all');
@@ -124,10 +101,15 @@ export default function KitchenPage() {
     ))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
-  // Pedidos filtrados para a aba de setor ativo (exclui pedidos sem itens daquele setor)
+  // Pedidos filtrados para a aba de setor ativo (exclui pedidos sem itens daquele setor e pedidos com todos os itens do setor já prontos)
   const ordersForTab = activeTab === 'all'
     ? activeOrders
-    : activeOrders.filter(o => o.items.some(it => it.sectorId === activeTab));
+    : activeOrders.filter(o => {
+        const sectorItems = o.items.filter(it => it.sectorId === activeTab);
+        if (sectorItems.length === 0) return false;
+        if (o.status === 'cancelled') return true;
+        return sectorItems.some(it => getEffectiveItemStatus(o, it) !== 'ready');
+      });
 
   function getTimerColor(minutes: number): string {
     if (minutes <= tempoAlerta) return 'text-timer-ok';
@@ -164,6 +146,15 @@ export default function KitchenPage() {
   /** Conta quantos pedidos têm pelo menos um item naquele setor. */
   function countForSector(sectorId: string): number {
     return activeOrders.filter(o => o.items.some(it => it.sectorId === sectorId)).length;
+  }
+
+  /**
+   * Em abas de setor, o botão principal finaliza apenas os itens visíveis daquele setor.
+   * A finalização do pedido completo continua restrita à aba "Comanda Completa".
+   */
+  function markVisibleItemsReady(order: Order) {
+    const itemsToUpdate = visibleItems(order).filter(item => (item.itemStatus ?? 'waiting') !== 'ready');
+    itemsToUpdate.forEach(item => updateItemStatus(order.id, item.id, 'ready'));
   }
 
   return (
@@ -229,6 +220,7 @@ export default function KitchenPage() {
             const minutes = getElapsedMinutes(order.createdAt);
             const items = visibleItems(order);
             const isCancelled = order.status === 'cancelled';
+            const isCritical = !isCancelled && minutes > tempoCritico;
 
             return (
               <motion.div
@@ -237,7 +229,13 @@ export default function KitchenPage() {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9, y: -20 }}
-                className={`rounded-xl border-2 ${isCancelled ? 'border-status-cancelled bg-status-cancelled/10' : `${getTimerBorder(minutes)} ${getTimerBg(minutes)}`} p-5 flex flex-col gap-4`}
+                className={`rounded-xl border-2 ${
+                  isCancelled
+                    ? 'border-status-cancelled bg-status-cancelled/10'
+                    : isCritical && animationsEnabled
+                    ? 'animate-pulse-danger border-timer-danger'
+                    : `${getTimerBorder(minutes)} ${getTimerBg(minutes)}`
+                } p-5 flex flex-col gap-4`}
               >
                 {/* Header */}
                 <div className="flex items-center justify-between">
@@ -279,21 +277,20 @@ export default function KitchenPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-sm font-medium">{item.name}</span>
-                            <ItemStatusBadge status={itemStatus} />
+                            {!isCancelled && (
+                              <ItemStatusToggle
+                                item={item}
+                                orderId={order.id}
+                                current={itemStatus}
+                                disabled={!canChangeItemStatus}
+                                onToggle={updateItemStatus}
+                              />
+                            )}
                           </div>
                           {formatItemNote(item.notes) && (
                             <p className="text-xs text-muted-foreground leading-tight mt-0.5">
                               Obs: {formatItemNote(item.notes)}
                             </p>
-                          )}
-                          {!isCancelled && (
-                            <ItemStatusToggle
-                              item={item}
-                              orderId={order.id}
-                              current={itemStatus}
-                              disabled={!canChangeItemStatus}
-                              onToggle={updateItemStatus}
-                            />
                           )}
                         </div>
                       </div>
@@ -326,6 +323,14 @@ export default function KitchenPage() {
                     className="w-full py-3 rounded-lg bg-status-preparing text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98]"
                   >
                     INICIAR PREPARO
+                  </button>
+                ) : activeTab !== 'all' ? (
+                  <button
+                    onClick={() => markVisibleItemsReady(order)}
+                    className="w-full py-3 rounded-lg bg-status-ready text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98] flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-5 h-5" />
+                    ITEM PRONTO
                   </button>
                 ) : (
                   <button

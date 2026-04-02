@@ -27,7 +27,7 @@ const userSchema = new mongoose.Schema(
     permissions: {
       type: [String],
       enum: ['admin', 'kitchen', 'display', 'settings', 'cook'],
-      default: ['admin', 'kitchen', 'display', 'settings', 'cook'],
+      default: ['admin', 'kitchen', 'display', 'settings'],
     },
     // IDs de setores permitidos para o usuário aceitar/preparar pedidos.
     sectorIds: {

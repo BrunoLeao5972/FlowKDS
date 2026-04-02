@@ -147,6 +147,24 @@
   animation: pulse-ready 2s ease-in-out infinite;
 }
 
+/* Pulse animation for critical (danger) orders */
+@keyframes pulse-danger {
+  0%, 100% {
+    border-color: hsl(var(--timer-danger));
+    background-color: hsl(var(--timer-danger) / 0.25);
+    box-shadow: 0 0 0 0 hsl(var(--timer-danger) / 0.5);
+  }
+  50% {
+    border-color: hsl(var(--timer-danger) / 0.4);
+    background-color: hsl(var(--timer-danger) / 0.05);
+    box-shadow: 0 0 16px 4px hsl(var(--timer-danger) / 0.25);
+  }
+}
+
+.animate-pulse-danger {
+  animation: pulse-danger 0.9s ease-in-out infinite;
+}
+
 /* Remove spinner arrows from numeric inputs (Chromium/WebKit and Firefox) */
 .no-spinner {
   -moz-appearance: textfield;

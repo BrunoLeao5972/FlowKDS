@@ -34,7 +34,7 @@ const AUTH_RESET_CODE = process.env.AUTH_RESET_CODE || '';
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || `${AUTH_PASSWORD || 'kds'}-token-secret`;
 const AUTH_TOKEN_TTL_HOURS = Number(process.env.AUTH_TOKEN_TTL_HOURS || 12);
 const LEGACY_TENANT_ID = process.env.LEGACY_TENANT_ID || 'legacy';
-const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings', 'cook'];
+const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings'];
 const PRINT_PEDIDO_AUTO_ENABLED = String(process.env.PRINT_PEDIDO_AUTO_ENABLED || 'false').trim().toLowerCase() === 'true';
 const PRINT_PEDIDO_MODO = String(process.env.PRINT_PEDIDO_MODO || 'IMPRESSORA').trim().toUpperCase();
 const PRINT_PEDIDO_IMPRESSORA = String(process.env.PRINT_PEDIDO_IMPRESSORA || '').trim();
@@ -194,7 +194,7 @@ async function resolveAuthUser(headerValue, token) {
     if (tokenUser) {
       return {
         username: tokenUser.username,
-        permissions: tokenUser.permissions || [],
+        permissions: normalizePermissions(tokenUser.permissions),
           sectorIds: tokenUser.sectorIds || [],
       };
     }
@@ -216,7 +216,7 @@ async function resolveAuthUser(headerValue, token) {
   if (!dbUser) return null;
   return {
     username: dbUser.username,
-    permissions: dbUser.permissions || [],
+    permissions: normalizePermissions(dbUser.permissions),
       sectorIds: dbUser.sectorIds || [],
   };
 }
@@ -265,6 +265,21 @@ function normalizeSectorIds(rawSectorIds) {
     .map(value => String(value || '').trim())
     .filter(Boolean);
   return [...new Set(cleaned)];
+}
+
+function normalizePermissions(rawPermissions) {
+  if (!Array.isArray(rawPermissions)) return [...ALL_PERMISSIONS];
+  const cleaned = rawPermissions
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+
+  // Compatibilidade: permissao legada "cook" passa a ser tratada como "kitchen".
+  if (cleaned.includes('cook') && !cleaned.includes('kitchen')) {
+    cleaned.push('kitchen');
+  }
+
+  const filtered = cleaned.filter(permission => ALL_PERMISSIONS.includes(permission));
+  return [...new Set(filtered)];
 }
 
 // Tenta descobrir um IPv4 local para facilitar o log de inicialização.
@@ -433,7 +448,7 @@ app.post('/auth/login', asyncHandler(async (req, res) => {
   return res.json({
     token: createAccessToken(user.username),
     enabled: true,
-    permissions: user.permissions || ALL_PERMISSIONS,
+    permissions: normalizePermissions(user.permissions),
     sectorIds: user.sectorIds || [],
   });
 }));
@@ -441,7 +456,10 @@ app.post('/auth/login', asyncHandler(async (req, res) => {
 // Endpoints de usuários
 app.get('/users', authMiddleware, asyncHandler(async (req, res) => {
   const users = await User.find({ tenantId: LEGACY_TENANT_ID }, 'username createdAt permissions sectorIds').sort({ createdAt: -1 }).lean();
-  res.json(users);
+  res.json(users.map(user => ({
+    ...user,
+    permissions: normalizePermissions(user.permissions),
+  })));
 }));
 
 app.patch('/users/:id/permissions', authMiddleware, asyncHandler(async (req, res) => {
@@ -450,11 +468,10 @@ app.patch('/users/:id/permissions', authMiddleware, asyncHandler(async (req, res
   if (!Array.isArray(permissions)) {
     return res.status(400).json({ error: 'permissions_must_be_array' });
   }
-  const VALID_PERMS = ALL_PERMISSIONS;
-  const filtered = permissions.filter(p => VALID_PERMS.includes(p));
+  const filtered = normalizePermissions(permissions);
   const user = await User.findByIdAndUpdate(id, { permissions: filtered }, { new: true, runValidators: true }).lean();
   if (!user) return res.status(404).json({ error: 'user_not_found' });
-  res.json({ id: user._id, username: user.username, permissions: user.permissions, sectorIds: user.sectorIds || [] });
+  res.json({ id: user._id, username: user.username, permissions: normalizePermissions(user.permissions), sectorIds: user.sectorIds || [] });
 }));
 
 app.patch('/users/:id/sectors', authMiddleware, asyncHandler(async (req, res) => {
@@ -495,7 +512,7 @@ app.post('/users', authMiddleware, asyncHandler(async (req, res) => {
     sectorIds: normalizeSectorIds(sectorIds),
   });
   await user.save();
-  res.status(201).json({ id: user._id, username: user.username, createdAt: user.createdAt, permissions: user.permissions || ALL_PERMISSIONS, sectorIds: user.sectorIds || [] });
+  res.status(201).json({ id: user._id, username: user.username, createdAt: user.createdAt, permissions: normalizePermissions(user.permissions), sectorIds: user.sectorIds || [] });
 }));
 
 app.patch('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
@@ -1261,7 +1278,11 @@ app.post('/orders', asyncHandler(async (req, res) => {
       name: it.name,
       quantity: it.quantity || 1,
       notes: it.notes || '',
-      sectorId: it.sectorId ? String(it.sectorId) : null,
+      sectorId: (() => {
+        const rawSector = it.sectorId ?? it.sector ?? it.setorId ?? it.setorid ?? it.setor;
+        if (rawSector === undefined || rawSector === null || rawSector === '') return null;
+        return String(rawSector).trim();
+      })(),
       itemStatus: 'waiting',
     }))
   };
@@ -1356,7 +1377,7 @@ app.patch('/orders/:id/status', asyncHandler(async (req, res) => {
   if (!order) return res.status(404).json({ error: 'not_found' });
 
   const authPermissions = req.authUser?.permissions || [];
-  const actorCookId = authPermissions.includes('cook') ? req.authUser?.username : null;
+  const actorCookId = authPermissions.includes('kitchen') ? req.authUser?.username : null;
   const resolvedCookId = actorCookId || (cookId ? String(cookId) : (order.cookId || null));
 
   // Somente usuários com setor em comum podem iniciar preparo (admin ignora regra).

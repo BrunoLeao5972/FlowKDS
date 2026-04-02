@@ -53,7 +53,7 @@ function createSaasRouter(io) {
       tenantId: String(tenant._id),
       username: String(adminUsername).trim().toLowerCase(),
       passwordHash: adminPassword,
-      permissions: ['admin', 'kitchen', 'display', 'settings', 'cook'],
+      permissions: ['admin', 'kitchen', 'display', 'settings'],
     });
     await user.save();
 
