@@ -1,16 +1,26 @@
 export type OrderStatus = 'received' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
+export type ItemStatus = 'waiting' | 'preparing' | 'ready';
+
+export interface Sector {
+  id: string;
+  name: string;
+  sortOrder: number;
+}
 
 export interface OrderItem {
   id: string;
   name: string;
   quantity: number;
   notes?: string;
+  sectorId?: string | null;
+  itemStatus?: ItemStatus;
 }
 
 export interface Order {
   id: string;
   number: number;
   customerName: string;
+  cookId?: string | null;
   items: OrderItem[];
   observations: string;
   status: OrderStatus;

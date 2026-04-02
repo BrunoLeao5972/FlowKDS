@@ -16,6 +16,7 @@ const Order = require('./models/Order');
 const AuthConfig = require('./models/AuthConfig');
 const RestaurantSettings = require('./models/RestaurantSettings');
 const User = require('./models/User');
+const Sector = require('./models/Sector');
 const { createSaasRouter } = require('./saas/routes');
 const { startSyncWorker } = require('./saas/syncWorker');
 const { verifyAccessToken: verifySaasAccessToken } = require('./saas/auth');
@@ -38,6 +39,8 @@ const PRINT_PEDIDO_AUTO_ENABLED = String(process.env.PRINT_PEDIDO_AUTO_ENABLED |
 const PRINT_PEDIDO_MODO = String(process.env.PRINT_PEDIDO_MODO || 'IMPRESSORA').trim().toUpperCase();
 const PRINT_PEDIDO_IMPRESSORA = String(process.env.PRINT_PEDIDO_IMPRESSORA || '').trim();
 const PRINT_PEDIDO_OUTPUT_DIR = String(process.env.PRINT_PEDIDO_OUTPUT_DIR || '').trim();
+const FIXED_PRINT_SCALE = 115;
+const REPORT_IDLE_BREAK_MINUTES = Number(process.env.REPORT_IDLE_BREAK_MINUTES || 180);
 
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(bodyParser.json());
@@ -183,6 +186,7 @@ async function resolveAuthUser(headerValue, token) {
       return {
         username: String(activeAuth.username),
         permissions: ALL_PERMISSIONS,
+          sectorIds: [],
       };
     }
 
@@ -191,6 +195,7 @@ async function resolveAuthUser(headerValue, token) {
       return {
         username: tokenUser.username,
         permissions: tokenUser.permissions || [],
+          sectorIds: tokenUser.sectorIds || [],
       };
     }
   }
@@ -203,6 +208,7 @@ async function resolveAuthUser(headerValue, token) {
     return {
       username: String(activeAuth.username),
       permissions: ALL_PERMISSIONS,
+        sectorIds: [],
     };
   }
 
@@ -211,6 +217,7 @@ async function resolveAuthUser(headerValue, token) {
   return {
     username: dbUser.username,
     permissions: dbUser.permissions || [],
+      sectorIds: dbUser.sectorIds || [],
   };
 }
 
@@ -251,6 +258,14 @@ io.use(async (socket, next) => {
 
 const VALID_STATUSES = ['received', 'preparing', 'ready', 'delivered', 'cancelled'];
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+function normalizeSectorIds(rawSectorIds) {
+  if (!Array.isArray(rawSectorIds)) return [];
+  const cleaned = rawSectorIds
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  return [...new Set(cleaned)];
+}
 
 // Tenta descobrir um IPv4 local para facilitar o log de inicialização.
 function getLocalIp() {
@@ -315,6 +330,14 @@ function avg(values) {
 
 function toMinutes(ms) {
   return ms / 60000;
+}
+
+function isSameLocalDay(tsA, tsB) {
+  const a = new Date(tsA);
+  const b = new Date(tsB);
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
 }
 
 function toSafeString(value) {
@@ -411,12 +434,13 @@ app.post('/auth/login', asyncHandler(async (req, res) => {
     token: createAccessToken(user.username),
     enabled: true,
     permissions: user.permissions || ALL_PERMISSIONS,
+    sectorIds: user.sectorIds || [],
   });
 }));
 
 // Endpoints de usuários
 app.get('/users', authMiddleware, asyncHandler(async (req, res) => {
-  const users = await User.find({ tenantId: LEGACY_TENANT_ID }, 'username createdAt permissions').sort({ createdAt: -1 }).lean();
+  const users = await User.find({ tenantId: LEGACY_TENANT_ID }, 'username createdAt permissions sectorIds').sort({ createdAt: -1 }).lean();
   res.json(users);
 }));
 
@@ -430,11 +454,28 @@ app.patch('/users/:id/permissions', authMiddleware, asyncHandler(async (req, res
   const filtered = permissions.filter(p => VALID_PERMS.includes(p));
   const user = await User.findByIdAndUpdate(id, { permissions: filtered }, { new: true, runValidators: true }).lean();
   if (!user) return res.status(404).json({ error: 'user_not_found' });
-  res.json({ id: user._id, username: user.username, permissions: user.permissions });
+  res.json({ id: user._id, username: user.username, permissions: user.permissions, sectorIds: user.sectorIds || [] });
+}));
+
+app.patch('/users/:id/sectors', authMiddleware, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { sectorIds } = req.body || {};
+  if (!Array.isArray(sectorIds)) {
+    return res.status(400).json({ error: 'sector_ids_must_be_array' });
+  }
+
+  const normalizedSectorIds = normalizeSectorIds(sectorIds);
+  const user = await User.findByIdAndUpdate(
+    id,
+    { sectorIds: normalizedSectorIds },
+    { new: true, runValidators: true }
+  ).lean();
+  if (!user) return res.status(404).json({ error: 'user_not_found' });
+  res.json({ id: user._id, username: user.username, sectorIds: user.sectorIds || [] });
 }));
 
 app.post('/users', authMiddleware, asyncHandler(async (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, sectorIds } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ error: 'username_and_password_required' });
   }
@@ -451,9 +492,51 @@ app.post('/users', authMiddleware, asyncHandler(async (req, res) => {
     tenantId: LEGACY_TENANT_ID,
     username: username.toLowerCase(),
     passwordHash: password,
+    sectorIds: normalizeSectorIds(sectorIds),
   });
   await user.save();
-  res.status(201).json({ id: user._id, username: user.username, createdAt: user.createdAt });
+  res.status(201).json({ id: user._id, username: user.username, createdAt: user.createdAt, permissions: user.permissions || ALL_PERMISSIONS, sectorIds: user.sectorIds || [] });
+}));
+
+app.patch('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { username, password } = req.body || {};
+
+  const user = await User.findOne({ _id: id, tenantId: LEGACY_TENANT_ID });
+  if (!user) return res.status(404).json({ error: 'user_not_found' });
+
+  if (username !== undefined) {
+    const nextUsername = String(username || '').trim().toLowerCase();
+    if (nextUsername.length < 3) {
+      return res.status(400).json({ error: 'username_too_short' });
+    }
+
+    if (nextUsername !== user.username) {
+      const existingUser = await User.findOne({ tenantId: LEGACY_TENANT_ID, username: nextUsername, _id: { $ne: id } }).lean();
+      if (existingUser) {
+        return res.status(409).json({ error: 'username_already_exists' });
+      }
+      user.username = nextUsername;
+    }
+  }
+
+  if (password !== undefined && password !== null && String(password).trim() !== '') {
+    const nextPassword = String(password);
+    if (nextPassword.length < 6) {
+      return res.status(400).json({ error: 'password_too_short' });
+    }
+    user.passwordHash = nextPassword;
+  }
+
+  await user.save();
+
+  return res.json({
+    id: user._id,
+    username: user.username,
+    createdAt: user.createdAt,
+    permissions: user.permissions || ALL_PERMISSIONS,
+    sectorIds: user.sectorIds || [],
+  });
 }));
 
 app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) => {
@@ -540,6 +623,8 @@ app.post('/print/ticket', authMiddleware, asyncHandler(async (req, res) => {
     customerName: String(body.customerName || ''),
     tradeName: String(body.tradeName || ''),
     items: Array.isArray(body.items) ? body.items : [],
+    printSize: String(body.printSize || '80mm'),
+    printScale: FIXED_PRINT_SCALE,
   });
 
   if (!result.ok) {
@@ -561,6 +646,33 @@ app.delete('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
   }
   res.status(204).end();
 }));
+
+// ── Setores ─────────────────────────────────────────────────────────────────
+
+// Retorna todos os setores sincronizados do SQL.
+app.get('/sectors', authMiddleware, asyncHandler(async (req, res) => {
+  const sectors = await Sector.find({ tenantId: LEGACY_TENANT_ID }).sort({ sortOrder: 1, sectorId: 1 }).lean();
+  res.json(sectors.map(s => ({ id: s.sectorId, name: s.name, sortOrder: s.sortOrder })));
+}));
+
+// Recebe a lista de setores enviada pelo bridge e faz upsert em massa.
+app.post('/sectors/sync', authMiddleware, asyncHandler(async (req, res) => {
+  const { sectors } = req.body || {};
+  if (!Array.isArray(sectors)) return res.status(400).json({ error: 'sectors_must_be_array' });
+
+  const ops = sectors.map((s, idx) => ({
+    updateOne: {
+      filter: { tenantId: LEGACY_TENANT_ID, sectorId: String(s.id) },
+      update: { $set: { name: String(s.name || s.id), sortOrder: idx } },
+      upsert: true,
+    },
+  }));
+
+  if (ops.length) await Sector.bulkWrite(ops, { ordered: false });
+  res.json({ synced: ops.length });
+}));
+
+// ── Pedidos ──────────────────────────────────────────────────────────────────
 
 app.use('/orders', authMiddleware);
 
@@ -946,20 +1058,42 @@ app.get('/reports/operational', authMiddleware, asyncHandler(async (req, res) =>
     .filter(Boolean)
     .sort((a, b) => a.start - b.start);
 
+  const idleBreakThresholdMs = (Number.isFinite(REPORT_IDLE_BREAK_MINUTES) && REPORT_IDLE_BREAK_MINUTES > 0
+    ? REPORT_IDLE_BREAK_MINUTES
+    : 180) * 60000;
+
   let idleTotalMs = 0;
   const idleGaps = [];
+  let ignoredIdleGaps = 0;
   for (let i = 1; i < intervals.length; i += 1) {
     const gap = intervals[i].start - intervals[i - 1].end;
-    if (gap > 0) {
-      idleTotalMs += gap;
-      idleGaps.push(gap);
+    if (gap <= 0) continue;
+
+    const crossedDayBoundary = !isSameLocalDay(intervals[i - 1].end, intervals[i].start);
+    const isLongBreak = gap > idleBreakThresholdMs;
+    if (crossedDayBoundary || isLongBreak) {
+      ignoredIdleGaps += 1;
+      continue;
     }
+
+    idleTotalMs += gap;
+    idleGaps.push(gap);
   }
 
   const betweenOrders = [];
+  let ignoredBetweenOrderGaps = 0;
   for (let i = 1; i < timelineOrders.length; i += 1) {
     const gap = timelineOrders[i].createdAt - timelineOrders[i - 1].createdAt;
-    if (gap > 0) betweenOrders.push(gap);
+    if (gap <= 0) continue;
+
+    const crossedDayBoundary = !isSameLocalDay(timelineOrders[i - 1].createdAt, timelineOrders[i].createdAt);
+    const isLongBreak = gap > idleBreakThresholdMs;
+    if (crossedDayBoundary || isLongBreak) {
+      ignoredBetweenOrderGaps += 1;
+      continue;
+    }
+
+    betweenOrders.push(gap);
   }
 
   const sweepEvents = [];
@@ -1062,6 +1196,9 @@ app.get('/reports/operational', authMiddleware, asyncHandler(async (req, res) =>
       idleTimeTotalMinutes: toMinutes(idleTotalMs),
       idleTimeAverageMinutes: avg(idleGaps.map(toMinutes)),
       averageTimeBetweenOrdersMinutes: avg(betweenOrders.map(toMinutes)),
+      idleBreakThresholdMinutes: idleBreakThresholdMs / 60000,
+      ignoredIdleGaps,
+      ignoredBetweenOrderGaps,
       simultaneousOrders: {
         max: maxConcurrent,
         average: avgConcurrent,
@@ -1092,7 +1229,7 @@ if (fs.existsSync(DIST)) {
 }
 
 app.post('/orders', asyncHandler(async (req, res) => {
-  const { number, customerName, items, observations, cookId } = req.body;
+  const { number, customerName, items, observations, cookId, suppressAutoPrint } = req.body;
   // number e items são obrigatórios; customerName pode ser vazio.
   if (!number || !Array.isArray(items)) {
     return res.status(400).json({ error: 'invalid_payload' });
@@ -1119,39 +1256,94 @@ app.post('/orders', asyncHandler(async (req, res) => {
     cookId: cookId || null,
     startedAtHistory: [],
     stageEvents: [{ status: 'received', at: now, cookId: cookId || null }],
-    items: items.map(it => ({ id: crypto.randomUUID(), name: it.name, quantity: it.quantity || 1, notes: it.notes || '' }))
+    items: items.map(it => ({
+      id: crypto.randomUUID(),
+      name: it.name,
+      quantity: it.quantity || 1,
+      notes: it.notes || '',
+      sectorId: it.sectorId ? String(it.sectorId) : null,
+      itemStatus: 'waiting',
+    }))
   };
 
   await Order.create(order);
   res.status(201).json(toISO(order));
   io.emit('orders:created', toISO(order));
 
-  if (PRINT_PEDIDO_AUTO_ENABLED) {
+  if (PRINT_PEDIDO_AUTO_ENABLED && !suppressAutoPrint) {
+    console.log(`[print-pedido] AUTO_ENABLED ativada - tentando imprimir pedido #${order.number}`);
     setImmediate(async () => {
-      const printResult = await printPedido(
-        order.number,
-        PRINT_PEDIDO_IMPRESSORA,
-        PRINT_PEDIDO_MODO,
-        {
-          outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
-          customerName: order.customerName || '',
-        }
-      );
+      try {
+        console.log(`[print-pedido] Buscando configurações do restaurante...`);
+        const settings = await RestaurantSettings.findOne({ tenantId: LEGACY_TENANT_ID }).lean() || {};
+        const tradeName = settings.tradeName || '';
+        const printSize = settings.printSize || '80mm';
+        const printScale = FIXED_PRINT_SCALE;
+        console.log(`[print-pedido] Settings encontradas: tradeName="${tradeName}", printSize="${printSize}", printScale=${printScale}`);
 
-      if (!printResult.ok) {
-        console.warn(
-          `[print-pedido] Falha no pedido ${order.number}: ${printResult.mensagem}`
-          + (printResult.erroTecnico ? ` | detalhe: ${printResult.erroTecnico}` : '')
+        const printResult = await printPedido(
+          order.number,
+          PRINT_PEDIDO_IMPRESSORA,
+          PRINT_PEDIDO_MODO,
+          {
+            outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
+            customerName: order.customerName || '',
+            tradeName,
+            items: order.items || [],
+            printSize,
+            printScale,
+          }
         );
-        return;
-      }
 
-      console.log(
-        `[print-pedido] Pedido ${order.number} impresso em modo ${PRINT_PEDIDO_MODO}`
-        + (printResult.arquivoGerado ? ` | arquivo: ${printResult.arquivoGerado}` : '')
-      );
+        if (!printResult.ok) {
+          console.warn(
+            `[print-pedido] Falha no pedido ${order.number}: ${printResult.mensagem}`
+            + (printResult.erroTecnico ? ` | detalhe: ${printResult.erroTecnico}` : '')
+          );
+          return;
+        }
+
+        console.log(
+          `[print-pedido] Pedido ${order.number} impresso em modo ${PRINT_PEDIDO_MODO}`
+          + (printResult.arquivoGerado ? ` | arquivo: ${printResult.arquivoGerado}` : '')
+        );
+      } catch (err) {
+        console.error('[print-pedido] Erro na impressão automática:', err.message);
+      }
     });
+  } else if (PRINT_PEDIDO_AUTO_ENABLED && suppressAutoPrint) {
+    console.log(`[print-pedido] Impressao automatica ignorada no pedido #${order.number} (suppressAutoPrint=true)`);
   }
+}));
+
+// Atualiza o status individual de um item dentro de um pedido.
+app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
+  const { id, itemId } = req.params;
+  const { itemStatus } = req.body || {};
+  const VALID_ITEM_STATUSES = ['waiting', 'preparing', 'ready'];
+  if (!itemStatus || !VALID_ITEM_STATUSES.includes(itemStatus)) {
+    return res.status(400).json({ error: 'invalid_item_status' });
+  }
+
+  const order = await Order.findOne({ tenantId: LEGACY_TENANT_ID, id }).lean();
+  if (!order) return res.status(404).json({ error: 'not_found' });
+
+  const itemIndex = order.items.findIndex(it => it.id === itemId);
+  if (itemIndex === -1) return res.status(404).json({ error: 'item_not_found' });
+
+  const now = Date.now();
+  const updatedItems = order.items.map((it, idx) =>
+    idx === itemIndex ? { ...it, itemStatus } : it
+  );
+
+  const updated = await Order.findOneAndUpdate(
+    { tenantId: LEGACY_TENANT_ID, id },
+    { items: updatedItems, updatedAt: now },
+    { new: true, lean: true }
+  );
+  if (!updated) return res.status(404).json({ error: 'not_found' });
+  io.emit('orders:updated', toISO(updated));
+  return res.json(toISO(updated));
 }));
 
 app.patch('/orders/:id/status', asyncHandler(async (req, res) => {
@@ -1166,6 +1358,23 @@ app.patch('/orders/:id/status', asyncHandler(async (req, res) => {
   const authPermissions = req.authUser?.permissions || [];
   const actorCookId = authPermissions.includes('cook') ? req.authUser?.username : null;
   const resolvedCookId = actorCookId || (cookId ? String(cookId) : (order.cookId || null));
+
+  // Somente usuários com setor em comum podem iniciar preparo (admin ignora regra).
+  if (status === 'preparing' && !authPermissions.includes('admin')) {
+    const userSectorIds = normalizeSectorIds(req.authUser?.sectorIds || []);
+    const orderSectorIds = normalizeSectorIds((order.items || []).map(item => item.sectorId));
+
+    if (!userSectorIds.length) {
+      return res.status(403).json({ error: 'user_without_sector' });
+    }
+
+    if (orderSectorIds.length > 0) {
+      const hasAllowedSector = orderSectorIds.some(sectorId => userSectorIds.includes(sectorId));
+      if (!hasAllowedSector) {
+        return res.status(403).json({ error: 'sector_not_allowed' });
+      }
+    }
+  }
 
   const now = Date.now();
   const patch = { status, updatedAt: now };

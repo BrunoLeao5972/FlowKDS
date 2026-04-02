@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev --prefix server\"",
+    "dev:full": "concurrently \"npm run dev\" \"npm run start:all\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",

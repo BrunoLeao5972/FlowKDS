@@ -1,14 +1,16 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Order, OrderStatus } from '@/types/order';
+import { Order, OrderStatus, Sector, ItemStatus } from '@/types/order';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';
 import { getDisplayCustomerName, getPrintableCustomerName } from '@/lib/customerName';
 
 interface OrderContextType {
   orders: Order[];
+  sectors: Sector[];
   addOrder: (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateStatus: (id: string, status: OrderStatus) => void;
+  updateStatus: (id: string, status: OrderStatus, cookId?: string) => void;
+  updateItemStatus: (orderId: string, itemId: string, itemStatus: ItemStatus) => void;
   cancelOrder: (id: string) => void;
   acknowledgeCancelledOrder: (id: string) => void;
   getOrdersByStatus: (status: OrderStatus) => Order[];
@@ -23,6 +25,7 @@ const INITIAL_ORDERS: Order[] = [];
 
 export function OrderProvider({ children }: { children: React.ReactNode }) {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
+  const [sectors, setSectors] = useState<Sector[]>([]);
   const settings = useSettings();
   const { token, isAuthenticated, logout } = useAuth();
 
@@ -37,6 +40,13 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   const resolvePrinterMode = useCallback((rawPrinterName: string) => {
     const input = String(rawPrinterName || '').trim();
     const upper = input.toUpperCase();
+
+    if (upper.startsWith('IMPRESSORA:')) {
+      return {
+        mode: 'IMPRESSORA' as const,
+        printerName: input.slice('IMPRESSORA:'.length).trim(),
+      };
+    }
 
     if (upper.startsWith('HTML:')) {
       return {
@@ -54,7 +64,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
 
     if (input) {
       return {
-        mode: 'FILE' as const,
+        mode: 'IMPRESSORA' as const,
         printerName: input,
       };
     }
@@ -79,12 +89,12 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     <style>
       body { font-family: Arial, sans-serif; margin: 0; padding: 16px; }
       .ticket { width: ${ticketWidth}px; border: 1px dashed #999; padding: 12px; }
-      .trade-name { text-align: center; font-weight: 700; font-size: 16px; margin-bottom: 4px; }
-      .title { text-align: center; font-size: 12px; color: #666; margin-bottom: 10px; }
+      .trade-name { text-align: center; font-weight: 700; font-size: 16px; margin-bottom: 4px; color: #222; }
+      .title { text-align: center; font-size: 12px; color: #222; margin-bottom: 10px; }
       .senha { text-align: center; font-size: 48px; font-weight: 700; margin: 8px 0; }
       .line { margin: 6px 0; font-size: 14px; }
       .items { margin-top: 10px; border-top: 1px dashed #bbb; padding-top: 8px; }
-      .footer { margin-top: 12px; border-top: 1px dashed #bbb; padding-top: 8px; text-align: center; font-size: 12px; color: #888; }
+      .footer { margin-top: 12px; border-top: 1px dashed #bbb; padding-top: 8px; text-align: center; font-size: 12px; color: #222; }
       .hint { margin-top: 10px; font-size: 12px; color: #666; }
       @media print { body { padding: 0; } .ticket { border: none; width: auto; } .hint { display: none; } }
     </style>
@@ -100,9 +110,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         ${order.items.map(item => `<div class="line">${item.quantity}x ${item.name}</div>`).join('') || '<div class="line">Sem itens</div>'}
       </div>
       <div class="footer">solucaosistemas.net</div>
-      <div class="hint">Use Ctrl+P para imprimir.</div>
+      <div class="hint">Modo HTML para visualizacao/teste.</div>
     </div>
-    <script>window.print();</script>
   </body>
 </html>`;
   }, [settings.printSize, settings.restaurantTradeName]);
@@ -128,6 +137,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             mode: 'HTML',
             printerName: resolved.printerName,
             printSize: settings.printSize,
+            printScale: settings.printScale,
             orderNumber: createdOrder.number,
             customerName: createdOrder.customerName,
             tradeName: settings.restaurantTradeName || '',
@@ -145,9 +155,10 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
-          mode: 'FILE',
+          mode,
           printerName: resolved.printerName,
           printSize: settings.printSize,
+          printScale: settings.printScale,
           orderNumber: createdOrder.number,
           customerName: createdOrder.customerName,
           tradeName: settings.restaurantTradeName || '',
@@ -155,9 +166,9 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         }),
       });
     } catch (error) {
-      console.error('Falha ao enviar impressão FILE', error);
+      console.error(`Falha ao enviar impressão ${mode}`, error);
     }
-  }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printSize, settings.restaurantTradeName]);
+  }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printScale, settings.printSize, settings.restaurantTradeName]);
 
   const reprintOrderTicket = useCallback(async (order: Order) => {
     const resolved = resolvePrinterMode(settings.printerName || '');
@@ -169,6 +180,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           mode: resolved.mode,
           printerName: resolved.printerName,
           printSize: settings.printSize,
+          printScale: settings.printScale,
           orderNumber: order.number,
           customerName: order.customerName,
           tradeName: settings.restaurantTradeName || '',
@@ -178,7 +190,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Falha ao reimprimir ticket', error);
     }
-  }, [API_BASE, authHeaders, resolvePrinterMode, settings.printerName, settings.printSize, settings.restaurantTradeName]);
+  }, [API_BASE, authHeaders, resolvePrinterMode, settings.printerName, settings.printScale, settings.printSize, settings.restaurantTradeName]);
 
   const addOrder = useCallback(async (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
@@ -196,6 +208,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       const normalized = {
         ...created,
         customerName: getDisplayCustomerName(created.customerName),
+        cookId: created.cookId || null,
         createdAt: new Date(created.createdAt),
         updatedAt: new Date(created.updatedAt),
         acceptedAt: created.acceptedAt ? new Date(created.acceptedAt) : undefined,
@@ -215,49 +228,64 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     }
   }, [API_BASE, authHeaders, logout, printOrderTicket]);
 
-  const updateStatus = useCallback(async (id: string, status: OrderStatus) => {
-    try {
-      const resp = await fetch(`${API_BASE}/orders/${id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ status }),
+  const updateStatus = useCallback((id: string, status: OrderStatus, cookId?: string) => {
+    // Optimistic update: atualiza UI imediatamente
+    const now = new Date();
+    const previousOrders = orders;
+    
+    setOrders(prev => prev.map(o => {
+      if (o.id !== id) return o;
+      return {
+        ...o,
+        status,
+        updatedAt: now,
+        acceptedAt: o.acceptedAt || (status === 'preparing' ? now : o.acceptedAt),
+        startedAt: o.startedAt || (status === 'preparing' ? now : o.startedAt),
+        prepareStartedAt: status === 'preparing' && !o.prepareStartedAt ? now : o.prepareStartedAt,
+        readyAt: status === 'ready' && !o.readyAt ? now : o.readyAt,
+        deliveredAt: status === 'delivered' && !o.deliveredAt ? now : o.deliveredAt,
+        cookId: status === 'preparing' ? (cookId || o.cookId || null) : o.cookId,
+      };
+    }));
+
+    // Sincroniza com servidor em background
+    fetch(`${API_BASE}/orders/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ status, ...(cookId ? { cookId } : {}) }),
+    })
+      .then(resp => {
+        if (resp.status === 401) {
+          logout();
+          return null;
+        }
+        if (!resp.ok) throw new Error('failed to update');
+        return resp.json();
+      })
+      .then(updated => {
+        if (!updated) return; // Caso 401
+        const normalized = {
+          ...updated,
+          cookId: updated.cookId || null,
+          createdAt: new Date(updated.createdAt),
+          updatedAt: new Date(updated.updatedAt),
+          acceptedAt: updated.acceptedAt ? new Date(updated.acceptedAt) : undefined,
+          startedAt: updated.startedAt ? new Date(updated.startedAt) : undefined,
+          finishedAt: updated.finishedAt ? new Date(updated.finishedAt) : undefined,
+          prepareStartedAt: updated.prepareStartedAt ? new Date(updated.prepareStartedAt) : undefined,
+          readyAt: updated.readyAt ? new Date(updated.readyAt) : undefined,
+          deliveredAt: updated.deliveredAt ? new Date(updated.deliveredAt) : undefined,
+          cancelledAt: updated.cancelledAt ? new Date(updated.cancelledAt) : undefined,
+          cancelAcknowledgedAt: updated.cancelAcknowledgedAt ? new Date(updated.cancelAcknowledgedAt) : undefined,
+        } as Order;
+        setOrders(prev => prev.map(o => (o.id === id ? normalized : o)));
+      })
+      .catch(err => {
+        console.error('updateStatus failed', err);
+        // Revert ao estado anterior em caso de erro
+        setOrders(previousOrders);
       });
-      if (resp.status === 401) {
-        logout();
-        return;
-      }
-      if (!resp.ok) throw new Error('failed to update');
-      const updated: Order = await resp.json();
-      const normalized = {
-        ...updated,
-        createdAt: new Date(updated.createdAt),
-        updatedAt: new Date(updated.updatedAt),
-        acceptedAt: updated.acceptedAt ? new Date(updated.acceptedAt) : undefined,
-        startedAt: updated.startedAt ? new Date(updated.startedAt) : undefined,
-        finishedAt: updated.finishedAt ? new Date(updated.finishedAt) : undefined,
-        prepareStartedAt: updated.prepareStartedAt ? new Date(updated.prepareStartedAt) : undefined,
-        readyAt: updated.readyAt ? new Date(updated.readyAt) : undefined,
-        deliveredAt: updated.deliveredAt ? new Date(updated.deliveredAt) : undefined,
-        cancelledAt: updated.cancelledAt ? new Date(updated.cancelledAt) : undefined,
-        cancelAcknowledgedAt: updated.cancelAcknowledgedAt ? new Date(updated.cancelAcknowledgedAt) : undefined,
-      } as Order;
-      setOrders(prev => prev.map(o => (o.id === id ? normalized : o)));
-    } catch (err) {
-      console.error('updateStatus failed', err);
-      setOrders(prev => prev.map(o => {
-        if (o.id !== id) return o;
-        const now = new Date();
-        return {
-          ...o,
-          status,
-          updatedAt: now,
-          prepareStartedAt: status === 'preparing' ? now : o.prepareStartedAt,
-          readyAt: status === 'ready' ? now : o.readyAt,
-          deliveredAt: status === 'delivered' ? now : o.deliveredAt,
-        };
-      }));
-    }
-  }, [API_BASE, authHeaders, logout]);
+  }, [API_BASE, authHeaders, logout, orders]);
 
   const cancelOrder = useCallback((id: string) => {
     updateStatus(id, 'cancelled');
@@ -280,6 +308,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       const updated: Order = await resp.json();
       const normalized = {
         ...updated,
+        cookId: updated.cookId || null,
         createdAt: new Date(updated.createdAt),
         updatedAt: new Date(updated.updatedAt),
         acceptedAt: updated.acceptedAt ? new Date(updated.acceptedAt) : undefined,
@@ -318,6 +347,23 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     return Math.round(averageMin);
   }, [orders]);
 
+  // Atualiza o status individual de um item (otimista + sincroniza com servidor).
+  const updateItemStatus = useCallback((orderId: string, itemId: string, itemStatus: ItemStatus) => {
+    setOrders(prev => prev.map(o => {
+      if (o.id !== orderId) return o;
+      return {
+        ...o,
+        items: o.items.map(it => it.id === itemId ? { ...it, itemStatus } : it),
+      };
+    }));
+
+    fetch(`${API_BASE}/orders/${orderId}/items/${itemId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ itemStatus }),
+    }).catch(err => console.error('updateItemStatus failed', err));
+  }, [API_BASE, authHeaders]);
+
   // Carrega pedidos e mantém sincronização em tempo real via socket.
   useEffect(() => {
     if (!isAuthenticated) {
@@ -338,6 +384,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           const normalized = data.map(d => ({
             ...d,
             customerName: getDisplayCustomerName(d.customerName),
+            cookId: d.cookId || null,
             createdAt: new Date(d.createdAt),
             updatedAt: new Date(d.updatedAt),
             acceptedAt: d.acceptedAt ? new Date(d.acceptedAt) : undefined,
@@ -358,6 +405,12 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
 
     fetchOrders(); // carga inicial
 
+    // Busca setores do servidor (não crítico, ignora falhas).
+    fetch(`${API_BASE}/sectors`, { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: Sector[]) => { if (Array.isArray(data)) setSectors(data); })
+      .catch(() => {});
+
     try {
       socket = io(API_BASE, {
         transports: ['websocket'],
@@ -371,6 +424,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         const normalized = {
           ...o,
           customerName: getDisplayCustomerName(o.customerName),
+          cookId: o.cookId || null,
           createdAt: new Date(o.createdAt),
           updatedAt: new Date(o.updatedAt),
           acceptedAt: o.acceptedAt ? new Date(o.acceptedAt) : undefined,
@@ -400,6 +454,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         const normalized = {
           ...o,
           customerName: getDisplayCustomerName(o.customerName),
+          cookId: o.cookId || null,
           createdAt: new Date(o.createdAt),
           updatedAt: new Date(o.updatedAt),
           acceptedAt: o.acceptedAt ? new Date(o.acceptedAt) : undefined,
@@ -441,7 +496,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [API_BASE, authHeaders, isAuthenticated, logout, settings, token]);
 
   return (
-    <OrderContext.Provider value={{ orders, addOrder, updateStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime, printOrderTicket, reprintOrderTicket }}>
+    <OrderContext.Provider value={{ orders, sectors, addOrder, updateStatus, updateItemStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime, printOrderTicket, reprintOrderTicket }}>
       {children}
     </OrderContext.Provider>
   );

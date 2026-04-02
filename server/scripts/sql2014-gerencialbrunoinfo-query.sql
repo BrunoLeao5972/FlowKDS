@@ -25,7 +25,8 @@ SELECT
   AS DATETIME2) AS updatedAt,
   COALESCE(NULLIF(vp.ProdutoApelido, ''), NULLIF(vp.ProdutoNome, ''), NULLIF(pp.ProdutoDescricao, ''), CONCAT('Produto ', CAST(pp.ProdutoID AS VARCHAR(30)))) AS itemName,
   CAST(CASE WHEN pp.QDE IS NULL OR pp.QDE <= 0 THEN 1 ELSE pp.QDE END AS INT) AS itemQuantity,
-  COALESCE(pp.Observacoes, '') AS itemNotes
+  COALESCE(pp.Observacoes, '') AS itemNotes,
+  COALESCE(CAST(pp.SetorID AS VARCHAR(20)), '') AS sectorId
 FROM vwLancamentos l
 INNER JOIN vwPedidosProdutos pp ON pp.LancamentoID = l.LancamentoID
 LEFT JOIN Clientes c ON c.[Código] = l.ClienteID

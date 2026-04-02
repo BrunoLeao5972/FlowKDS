@@ -12,6 +12,8 @@ const MODOS_SAIDA = {
   HTML: 'HTML',
 };
 
+const FIXED_PRINT_SCALE = 115;
+
 function formatarDataHora(date) {
   const d = new Date(date);
   const dd = String(d.getDate()).padStart(2, '0');
@@ -50,12 +52,67 @@ function gerarConteudoPedido(numeroPedido, customerName = '', dataHora = new Dat
   return lines.join('\r\n');
 }
 
+function montarDadosTicket(numeroPedido, options = {}) {
+  const printSizeRaw = String(options.printSize || '80mm').trim().toLowerCase();
+  const printSize = ['58mm', '80mm', 'a4'].includes(printSizeRaw) ? printSizeRaw : '80mm';
+  const printScale = FIXED_PRINT_SCALE;
+
+  return {
+    numeroPedido: Number(numeroPedido),
+    tradeName: String(options.tradeName || '').trim(),
+    customerName: obterNomeClienteParaImpressao(options.customerName || ''),
+    dataHora: formatarDataHora(options.dataHora || new Date()),
+    printSize,
+    printScale,
+    items: Array.isArray(options.items)
+      ? options.items.map(item => ({
+        quantity: Number(item?.quantity || 1),
+        name: String(item?.name || '').trim(),
+        notes: String(item?.notes || '').trim(),
+      }))
+      : [],
+  };
+}
+
+function gerarConteudoPedidoTexto(ticket) {
+  return gerarConteudoPedido(
+    ticket.numeroPedido,
+    ticket.customerName,
+    new Date(),
+    ticket.tradeName
+  );
+}
+
 function escapePowerShellSingleQuote(value) {
   return String(value || '').replace(/'/g, "''");
 }
 
 function normalizarModoSaida(modoSaida) {
   return String(modoSaida || '').trim().toUpperCase();
+}
+
+function normalizarParaAscii(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E\r\n]/g, '');
+}
+
+function montarPayloadRaw(conteudo, nomeImpressora) {
+  const printer = String(nomeImpressora || '').toLowerCase();
+  const texto = `${normalizarParaAscii(conteudo).replace(/\r?\n/g, '\r\n')}\r\n\r\n\r\n`;
+  const textoBytes = Buffer.from(texto, 'ascii');
+
+  const escInit = Buffer.from([0x1b, 0x40]);
+  const escAlignLeft = Buffer.from([0x1b, 0x61, 0x00]);
+  const feed = Buffer.from([0x0a, 0x0a]);
+  const cutParcial = Buffer.from([0x1d, 0x56, 0x41, 0x10]);
+
+  if (printer.includes('daruma')) {
+    return Buffer.concat([escInit, escAlignLeft, textoBytes, feed, cutParcial]);
+  }
+
+  return Buffer.concat([escInit, escAlignLeft, textoBytes]);
 }
 
 function obterPastaSaida(customOutputDir) {
@@ -103,7 +160,7 @@ async function impressoraExiste(nomeImpressora) {
   return printers.some(p => p.trim().toLowerCase() === target);
 }
 
-async function imprimirDireto(conteudo, nomeImpressora) {
+async function imprimirDireto(ticket, nomeImpressora) {
   if (process.platform !== 'win32') {
     return {
       ok: false,
@@ -138,32 +195,214 @@ async function imprimirDireto(conteudo, nomeImpressora) {
     };
   }
 
-  const printerEscaped = escapePowerShellSingleQuote(nomeImpressora);
-  const contentB64 = Buffer.from(String(conteudo || ''), 'utf8').toString('base64');
+  // GDI primeiro: funciona melhor com driver Windows (caso comum da Daruma)
+  const resultadoGdi = await imprimirDiretoGdi(ticket, nomeImpressora);
+  if (resultadoGdi.ok) {
+    return resultadoGdi;
+  }
 
-  const command = [
-    'Add-Type -AssemblyName System.Drawing',
-    `$printerName = '${printerEscaped}'`,
-    `$content = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${contentB64}'))`,
-    '$doc = New-Object System.Drawing.Printing.PrintDocument',
-    '$doc.DocumentName = "SenhaPedido"',
-    '$doc.PrinterSettings.PrinterName = $printerName',
-    'if (-not $doc.PrinterSettings.IsValid) { throw "Impressora invalida ou indisponivel." }',
-    '$handler = [System.Drawing.Printing.PrintPageEventHandler]{ param($sender, $e) $font = New-Object System.Drawing.Font("Consolas", 12); $e.Graphics.DrawString($content, $font, [System.Drawing.Brushes]::Black, $e.MarginBounds); $e.HasMorePages = $false }',
-    '$doc.add_PrintPage($handler)',
-    '$doc.Print()',
-    '$doc.remove_PrintPage($handler)',
-  ].join('; ');
+  // Fallback RAW: para drivers com passthrough ESC/POS
+  const resultadoRaw = await imprimirDiretoRaw(gerarConteudoPedidoTexto(ticket), nomeImpressora);
+  if (resultadoRaw.ok) {
+    return { ...resultadoRaw, mensagem: 'Impressao RAW enviada (fallback).' };
+  }
+
+  return {
+    ok: false,
+    mensagem: 'Falha ao imprimir diretamente na impressora.',
+    arquivoGerado: null,
+    erroTecnico: `GDI: ${resultadoGdi.erroTecnico || resultadoGdi.mensagem} | RAW: ${resultadoRaw.erroTecnico || resultadoRaw.mensagem}`,
+  };
+}
+
+async function imprimirDiretoRaw(conteudo, nomeImpressora) {
+  const payload = montarPayloadRaw(conteudo, nomeImpressora);
+  const printerEscaped = escapePowerShellSingleQuote(nomeImpressora);
+
+  const binFile = path.join(os.tmpdir(), `kds-raw-${Date.now()}.bin`);
+  const ps1File = path.join(os.tmpdir(), `kds-raw-${Date.now()}.ps1`);
+
+  const ps1 = `$printerName = '${printerEscaped}'
+$bytes = [System.IO.File]::ReadAllBytes('${escapePowerShellSingleQuote(binFile)}')
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class RawPrinterHelper {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public class DOCINFO {
+    [MarshalAs(UnmanagedType.LPWStr)] public string pDocName;
+    [MarshalAs(UnmanagedType.LPWStr)] public string pOutputFile;
+    [MarshalAs(UnmanagedType.LPWStr)] public string pDataType;
+  }
+  [DllImport("winspool.Drv", EntryPoint="OpenPrinterW", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern bool OpenPrinter(string pPrinterName, out IntPtr phPrinter, IntPtr pDefault);
+  [DllImport("winspool.Drv", SetLastError=true)]
+  public static extern bool ClosePrinter(IntPtr hPrinter);
+  [DllImport("winspool.Drv", SetLastError=true, CharSet=CharSet.Unicode)]
+  public static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In] DOCINFO di);
+  [DllImport("winspool.Drv", SetLastError=true)]
+  public static extern bool EndDocPrinter(IntPtr hPrinter);
+  [DllImport("winspool.Drv", SetLastError=true)]
+  public static extern bool StartPagePrinter(IntPtr hPrinter);
+  [DllImport("winspool.Drv", SetLastError=true)]
+  public static extern bool EndPagePrinter(IntPtr hPrinter);
+  [DllImport("winspool.Drv", SetLastError=true)]
+  public static extern bool WritePrinter(IntPtr hPrinter, byte[] pBytes, int dwCount, out int dwWritten);
+  public static bool SendBytesToPrinter(string printerName, byte[] bytes) {
+    IntPtr hPrinter;
+    if (!OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) return false;
+    try {
+      var di = new DOCINFO();
+      di.pDocName = "SenhaPedido";
+      di.pDataType = "RAW";
+      if (!StartDocPrinter(hPrinter, 1, di)) return false;
+      try {
+        if (!StartPagePrinter(hPrinter)) return false;
+        try {
+          int written;
+          if (!WritePrinter(hPrinter, bytes, bytes.Length, out written)) return false;
+          return written == bytes.Length;
+        } finally { EndPagePrinter(hPrinter); }
+      } finally { EndDocPrinter(hPrinter); }
+    } finally { ClosePrinter(hPrinter); }
+  }
+}
+"@
+$ok = [RawPrinterHelper]::SendBytesToPrinter($printerName, $bytes)
+if (-not $ok) { throw 'Falha no envio RAW para a impressora.' }
+`;
 
   try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-Command', command], {
+    await fs.writeFile(binFile, payload);
+    await fs.writeFile(ps1File, ps1, 'utf8');
+    await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1File], {
       windowsHide: true,
       maxBuffer: 1024 * 1024,
     });
-
     return {
       ok: true,
-      mensagem: 'Impressao enviada com sucesso para a impressora.',
+      mensagem: 'Impressao RAW enviada com sucesso para a impressora.',
+      arquivoGerado: null,
+      erroTecnico: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mensagem: 'Falha na impressao RAW.',
+      arquivoGerado: null,
+      erroTecnico: error?.message || String(error),
+    };
+  } finally {
+    await fs.unlink(binFile).catch(() => {});
+    await fs.unlink(ps1File).catch(() => {});
+  }
+}
+
+async function imprimirDiretoGdi(ticket, nomeImpressora) {
+  const printerEscaped = escapePowerShellSingleQuote(nomeImpressora);
+  const payload = {
+    numeroPedido: normalizarParaAscii(String(ticket?.numeroPedido || '')),
+    tradeName: normalizarParaAscii(String(ticket?.tradeName || '')),
+    customerName: normalizarParaAscii(String(ticket?.customerName || '')),
+    dataHora: normalizarParaAscii(String(ticket?.dataHora || '')),
+    printSize: String(ticket?.printSize || '80mm').toLowerCase(),
+    printScale: FIXED_PRINT_SCALE,
+    items: Array.isArray(ticket?.items)
+      ? ticket.items.map(item => ({
+        quantity: Number(item?.quantity || 1),
+        name: normalizarParaAscii(String(item?.name || '')),
+        notes: normalizarParaAscii(String(item?.notes || '')),
+      }))
+      : [],
+  };
+  const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+
+  const ps1File = path.join(os.tmpdir(), `kds-gdi-${Date.now()}.ps1`);
+  const ps1 = `Add-Type -AssemblyName System.Drawing
+$printerName = '${printerEscaped}'
+$payloadB64 = '${payloadBase64}'
+$payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payloadB64))
+$ticket = $payloadJson | ConvertFrom-Json
+$doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.DocumentName = 'SenhaPedido'
+$doc.PrinterSettings.PrinterName = $printerName
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(5, 5, 5, 5)
+if (-not $doc.PrinterSettings.IsValid) { throw 'Impressora invalida ou indisponivel.' }
+$doc.add_PrintPage({
+  param($sender, $e)
+  $is80mm = ([string]$ticket.printSize -eq '80mm')
+  $scalePct = if ($is80mm) { [Math]::Min(160, [Math]::Max(80, [int]$ticket.printScale)) } else { 100 }
+  $scale = [float]$scalePct / 100.0
+  $black = [System.Drawing.Brushes]::Black
+  $fontTrade = New-Object System.Drawing.Font('Arial', (10 * $scale), [System.Drawing.FontStyle]::Bold)
+  $fontLabel = New-Object System.Drawing.Font('Arial', (8 * $scale), [System.Drawing.FontStyle]::Regular)
+  $fontSenha = New-Object System.Drawing.Font('Arial', (28 * $scale), [System.Drawing.FontStyle]::Bold)
+  $fontInfo = New-Object System.Drawing.Font('Arial', (8 * $scale), [System.Drawing.FontStyle]::Regular)
+  $fontFooter = New-Object System.Drawing.Font('Arial', (8 * $scale), [System.Drawing.FontStyle]::Regular)
+
+  $x = [float](8 * $scale)
+  $y = [float](8 * $scale)
+  $width = [float]([Math]::Max((260 * $scale), $e.MarginBounds.Width - (16 * $scale)))
+
+  function Draw-CenteredText([string]$text, $font, [float]$yPos) {
+    if ([string]::IsNullOrWhiteSpace($text)) { return 0 }
+    $size = $e.Graphics.MeasureString($text, $font)
+    $centerX = $x + (($width - $size.Width) / 2)
+    $e.Graphics.DrawString($text, $font, $black, [float][Math]::Max($x, $centerX), $yPos)
+    return [float]$size.Height
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($ticket.tradeName)) {
+    $y += Draw-CenteredText $ticket.tradeName $fontTrade $y
+    $y += (4 * $scale)
+  }
+
+  $e.Graphics.DrawLine([System.Drawing.Pens]::Black, $x, $y, $x + $width, $y)
+  $y += (4 * $scale)
+  $y += Draw-CenteredText 'Senha do Pedido' $fontLabel $y
+  $y += (2 * $scale)
+  $y += Draw-CenteredText ([string]$ticket.numeroPedido) $fontSenha $y
+  $y += (4 * $scale)
+  $e.Graphics.DrawLine([System.Drawing.Pens]::Black, $x, $y, $x + $width, $y)
+  $y += (6 * $scale)
+
+  $e.Graphics.DrawString(('Cliente: ' + [string]$ticket.customerName), $fontInfo, $black, $x, $y)
+  $y += [float]$fontInfo.GetHeight($e.Graphics) + (2 * $scale)
+  $e.Graphics.DrawString(('Data/Hora: ' + [string]$ticket.dataHora), $fontInfo, $black, $x, $y)
+  $y += [float]$fontInfo.GetHeight($e.Graphics) + (4 * $scale)
+
+  if ($ticket.items -and $ticket.items.Count -gt 0) {
+    $e.Graphics.DrawString('Itens', $fontLabel, $black, $x, $y)
+    $y += [float]$fontLabel.GetHeight($e.Graphics) + (2 * $scale)
+    foreach ($item in $ticket.items) {
+      $line = ('{0}x {1}' -f [int]$item.quantity, [string]$item.name)
+      $e.Graphics.DrawString($line, $fontInfo, $black, $x, $y)
+      $y += [float]$fontInfo.GetHeight($e.Graphics) + (1 * $scale)
+      if (-not [string]::IsNullOrWhiteSpace([string]$item.notes)) {
+        $e.Graphics.DrawString(('(' + [string]$item.notes + ')'), $fontLabel, $black, $x + (8 * $scale), $y)
+        $y += [float]$fontLabel.GetHeight($e.Graphics) + (1 * $scale)
+      }
+    }
+  }
+
+  $y += (4 * $scale)
+  $e.Graphics.DrawLine([System.Drawing.Pens]::Black, $x, $y, $x + $width, $y)
+  $y += (4 * $scale)
+  [void](Draw-CenteredText 'solucaosistemas.net' $fontFooter $y)
+  $e.HasMorePages = $false
+})
+$doc.Print()
+`;
+
+  try {
+    await fs.writeFile(ps1File, ps1, 'utf8');
+    await execFileAsync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1File], {
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+    return {
+      ok: true,
+      mensagem: 'Impressao GDI enviada com sucesso para a impressora.',
       arquivoGerado: null,
       erroTecnico: null,
     };
@@ -174,6 +413,8 @@ async function imprimirDireto(conteudo, nomeImpressora) {
       arquivoGerado: null,
       erroTecnico: error?.message || String(error),
     };
+  } finally {
+    await fs.unlink(ps1File).catch(() => {});
   }
 }
 
@@ -276,16 +517,16 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
     * { box-sizing: border-box; }
     body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
     .ticket { background: #fff; border: 1px dashed #555; border-radius: 4px; padding: 16px; width: 320px; }
-    .trade-name { text-align: center; font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+    .trade-name { text-align: center; font-size: 17px; font-weight: 700; margin-bottom: 2px; color: #222; }
     .divider { border: none; border-top: 1px dashed #aaa; margin: 10px 0; }
-    .label-senha { text-align: center; font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+    .label-senha { text-align: center; font-size: 12px; color: #222; text-transform: uppercase; letter-spacing: 1px; }
     .senha { text-align: center; font-size: 52px; font-weight: 900; margin: 4px 0 10px; }
     .info-line { font-size: 13px; margin: 4px 0; }
     .info-line strong { font-weight: 600; }
     .items-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin: 8px 0 4px; }
     .item { font-size: 13px; margin: 3px 0; }
     .obs { color: #888; font-size: 11px; }
-    .footer { margin-top: 12px; text-align: center; font-size: 12px; color: #888; }
+    .footer { margin-top: 12px; text-align: center; font-size: 12px; color: #222; }
     @media print { body { background: none; padding: 0; } .ticket { border: none; width: auto; } }
   </style>
 </head>
@@ -302,7 +543,6 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
     <hr class="divider" />
     <div class="footer">solucaosistemas.net</div>
   </div>
-  <script>window.print();</script>
 </body>
 </html>`;
 
@@ -339,19 +579,26 @@ async function printPedido(numeroPedido, nomeImpressora, modoSaida, options = {}
     };
   }
 
-  const conteudo = gerarConteudoPedido(pedido, options.customerName || '', new Date(), options.tradeName || '');
+  const ticket = montarDadosTicket(pedido, {
+    customerName: options.customerName || '',
+    tradeName: options.tradeName || '',
+    items: Array.isArray(options.items) ? options.items : [],
+    printSize: options.printSize || '80mm',
+    printScale: FIXED_PRINT_SCALE,
+    dataHora: new Date(),
+  });
 
   if (modo === MODOS_SAIDA.IMPRESSORA) {
-    return imprimirDireto(conteudo, nomeImpressora);
+    return imprimirDireto(ticket, nomeImpressora);
   }
   if (modo === MODOS_SAIDA.FILE) {
-    return gerarArquivoTxt(conteudo, pedido, options.outputDir);
+    return gerarArquivoTxt(gerarConteudoPedidoTexto(ticket), pedido, options.outputDir);
   }
   return gerarHtml(pedido, {
-    tradeName:    options.tradeName    || '',
-    customerName: options.customerName || '',
-    items:        Array.isArray(options.items) ? options.items : [],
-    dataHora:     new Date(),
+    tradeName: ticket.tradeName,
+    customerName: ticket.customerName,
+    items: ticket.items,
+    dataHora: new Date(),
   }, options.outputDir);
 }
 

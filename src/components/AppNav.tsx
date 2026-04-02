@@ -54,6 +54,7 @@ export function AppNav() {
     setReadyOrderSoundEnabled,
     setPrinterName,
     setPrintSize,
+    setPrintScale,
   } = useSettings();
 
   const getApiBase = () => {
@@ -164,7 +165,8 @@ export function AppNav() {
             newOrderEnabled,
             readyEnabled,
             printerName,
-            printSize
+            printSize,
+            printScale
           ) => {
             setTempoMedio(medio);
             setTempoCritico(critico);
@@ -198,6 +200,7 @@ export function AppNav() {
             setReadyOrderSoundEnabled(!!readyEnabled);
             setPrinterName(printerName);
             setPrintSize(printSize);
+            setPrintScale(115);
             // if user enabled daily-reset or custom-start, update last reset date to today so numbering starts immediately
             if (orderMode === 'daily-reset' || orderMode === 'custom-start') touchResetDate();
             setShowConfig(false);

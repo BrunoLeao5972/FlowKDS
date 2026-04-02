@@ -37,7 +37,7 @@ function AppContent() {
       </div>
       
       {!isLoginPage && (
-        <footer className="fixed bottom-0 left-0 w-full border-t border-border bg-card text-center text-sm text-muted-foreground py-2 z-40">
+        <footer className="fixed bottom-0 left-0 w-full border-t border-border bg-card text-center text-sm text-foreground py-2 z-40">
           <div className="max-w-7xl mx-auto px-4">Solução Sistemas - A sua cozinha ainda mais eficiente</div>
         </footer>
       )}

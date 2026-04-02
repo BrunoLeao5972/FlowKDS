@@ -29,6 +29,11 @@ const userSchema = new mongoose.Schema(
       enum: ['admin', 'kitchen', 'display', 'settings', 'cook'],
       default: ['admin', 'kitchen', 'display', 'settings', 'cook'],
     },
+    // IDs de setores permitidos para o usuário aceitar/preparar pedidos.
+    sectorIds: {
+      type: [String],
+      default: [],
+    },
   },
   {
     versionKey: false,

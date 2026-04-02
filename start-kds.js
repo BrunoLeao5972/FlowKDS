@@ -3,12 +3,14 @@
  * Script de inicialização completa do KDS
  * Inicia tanto o servidor Express quanto o worker de sincronização SQL2014
  */
-const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+import { spawn } from 'child_process';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const SERVER_DIR = path.join(__dirname, 'server');
-require('dotenv').config({ path: path.join(SERVER_DIR, '.env') });
 
 const APP_NAME = 'Flow KDS';
 const LOG_DIR = path.join(__dirname, '.kds-logs');
@@ -35,10 +37,13 @@ function startProcess(name, command, args, cwd = SERVER_DIR) {
   const logStream = createLogStream(name);
   const child = spawn(command, args, {
     cwd,
-    stdio: ['ignore', logStream, logStream],
+    stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
     env: { ...process.env },
   });
+
+  if (child.stdout) child.stdout.pipe(logStream);
+  if (child.stderr) child.stderr.pipe(logStream);
 
   children.push(child);
 

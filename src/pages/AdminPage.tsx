@@ -30,6 +30,7 @@ const PREV_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
 };
 
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 20, 25, 30] as const;
+const RECENT_WINDOW_HOURS = 3;
 
 function formatItemNote(raw?: string) {
   const text = String(raw || '').trim();
@@ -44,13 +45,27 @@ function formatItemNote(raw?: string) {
   return text;
 }
 
+function isWithinLastHours(date: Date, hours: number): boolean {
+  return Date.now() - date.getTime() <= hours * 60 * 60 * 1000;
+}
+
+function isRecentOrder(order: Order): boolean {
+  if (order.status === 'delivered') {
+    const deliveredAt = order.deliveredAt || order.updatedAt || order.createdAt;
+    return isWithinLastHours(deliveredAt, RECENT_WINDOW_HOURS);
+  }
+  return isWithinLastHours(order.createdAt, RECENT_WINDOW_HOURS);
+}
+
 export default function AdminPage() {
   const { orders, updateStatus, cancelOrder, getOrdersByStatus, getAveragePrepTime, reprintOrderTicket } = useOrders();
   const [filter, setFilter] = useState<OrderStatus | 'all'>('all');
+  const [timeMode, setTimeMode] = useState<'recent' | 'older'>('recent');
   const [search, setSearch] = useState('');
   const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [ordersPerPage, setOrdersPerPage] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
+  const [, setTimeTick] = useState(0);
 
   const stats = [
     { label: 'Em Preparo', value: getOrdersByStatus('preparing').length, color: 'text-status-preparing', icon: ChefHat },
@@ -61,8 +76,14 @@ export default function AdminPage() {
 
   const isMobile = useIsMobile();
 
+  useEffect(() => {
+    const interval = setInterval(() => setTimeTick(v => v + 1), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   const filtered = orders
     .filter(o => filter === 'all' || o.status === filter)
+    .filter(o => (timeMode === 'recent' ? isRecentOrder(o) : !isRecentOrder(o)))
     .filter(o => {
       if (!search) return true;
       const s = search.toLowerCase();
@@ -136,6 +157,22 @@ export default function AdminPage() {
             </Button>
           ))}
         </div>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            variant={timeMode === 'recent' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setTimeMode('recent')}
+          >
+            Ultimas 3h
+          </Button>
+          <Button
+            variant={timeMode === 'older' ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setTimeMode('older')}
+          >
+            Pedidos anteriores
+          </Button>
+        </div>
         <div className="flex items-center gap-2 ml-auto">
           <label htmlFor="orders-per-page" className="text-sm text-muted-foreground">Pedidos por página</label>
           <select
@@ -208,6 +245,17 @@ export default function AdminPage() {
                             Voltar
                           </Button>
                         )}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          className="flex-1"
+                          variant="outline"
+                          title="Reimprimir senha do pedido"
+                          onClick={() => reprintOrderTicket(order)}
+                        >
+                          <Printer className="w-4 h-4 mr-1" />
+                          Reimprimir
+                        </Button>
                       </div>
                       <div className="flex gap-2">
                         {order.status !== 'cancelled' && order.status !== 'delivered' && (

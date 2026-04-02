@@ -24,6 +24,7 @@ type Settings = {
   readyOrderSoundEnabled: boolean;
   printerName: string;
   printSize: PrintSize;
+  printScale: number;
   // order numbering settings
   orderNumberMode: OrderNumberMode;
   customStartNumber: number;
@@ -47,6 +48,7 @@ type Settings = {
   setReadyOrderSoundEnabled: (b: boolean) => void;
   setPrinterName: (name: string) => void;
   setPrintSize: (size: PrintSize) => void;
+  setPrintScale: (scale: number) => void;
   setOrderNumberMode: (m: OrderNumberMode) => void;
   setCustomStartNumber: (n: number) => void;
   // helper: compute next order number given current orders
@@ -56,6 +58,7 @@ type Settings = {
 };
 
 const STORAGE_KEY = 'kds:settings:v1';
+const FIXED_PRINT_SCALE = 115;
 
 const defaultValues: Settings = {
   tempoMedio: 15,
@@ -77,6 +80,7 @@ const defaultValues: Settings = {
   readyOrderSoundEnabled: true,
   printerName: '',
   printSize: '80mm',
+  printScale: FIXED_PRINT_SCALE,
   orderNumberMode: 'continuous',
   customStartNumber: 100,
   lastResetDate: null,
@@ -99,6 +103,7 @@ const defaultValues: Settings = {
   setReadyOrderSoundEnabled: () => {},
   setPrinterName: () => {},
   setPrintSize: () => {},
+  setPrintScale: () => {},
   setOrderNumberMode: () => {},
   setCustomStartNumber: () => {},
   computeNextNumber: () => 101,
@@ -139,6 +144,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [readyOrderSoundEnabled, setReadyOrderSoundEnabled] = useState<boolean>(defaultValues.readyOrderSoundEnabled);
   const [printerName, setPrinterName] = useState<string>(defaultValues.printerName);
   const [printSize, setPrintSize] = useState<PrintSize>(defaultValues.printSize);
+  const [printScale, setPrintScale] = useState<number>(defaultValues.printScale);
 
   const [orderNumberMode, setOrderNumberMode] = useState<OrderNumberMode>(defaultValues.orderNumberMode);
   const [customStartNumber, setCustomStartNumber] = useState<number>(defaultValues.customStartNumber);
@@ -180,6 +186,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (typeof parsed.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(parsed.readyOrderSoundEnabled);
         if (typeof parsed.printerName === 'string') setPrinterName(parsed.printerName);
         if (parsed.printSize === '58mm' || parsed.printSize === '80mm' || parsed.printSize === 'A4') setPrintSize(parsed.printSize);
+        setPrintScale(FIXED_PRINT_SCALE);
       }
     } catch (e) {
       // ignore
@@ -239,6 +246,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
       readyOrderSoundEnabled,
       printerName,
       printSize,
+      printScale: FIXED_PRINT_SCALE,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
@@ -266,6 +274,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     readyOrderSoundEnabled,
     printerName,
     printSize,
+    printScale,
   ]);
 
   const touchResetDate = (date?: Date) => {
@@ -328,12 +337,14 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         readyOrderSoundEnabled,
         printerName,
         printSize,
+        printScale: FIXED_PRINT_SCALE,
         setNewOrderSound: _setNewOrderSound,
         setReadyOrderSound: _setReadyOrderSound,
         setNewOrderSoundEnabled: _setNewOrderSoundEnabled,
         setReadyOrderSoundEnabled: _setReadyOrderSoundEnabled,
         setPrinterName,
         setPrintSize,
+        setPrintScale: () => setPrintScale(FIXED_PRINT_SCALE),
         orderNumberMode,
         customStartNumber,
         lastResetDate,

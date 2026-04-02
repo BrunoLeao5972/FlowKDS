@@ -4,6 +4,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Bell } from 'lucide-react';
 import { getDisplayCustomerName } from '@/lib/customerName';
 
+const RECENT_WINDOW_HOURS = 3;
+
+function isWithinLastHours(date: Date, hours: number): boolean {
+  return Date.now() - date.getTime() <= hours * 60 * 60 * 1000;
+}
+
 export default function PublicDisplayPage() {
   const { orders } = useOrders();
   const [, setTick] = useState(0);
@@ -14,11 +20,11 @@ export default function PublicDisplayPage() {
   }, []);
 
   const preparingOrders = orders
-    .filter(o => o.status === 'preparing')
+    .filter(o => o.status === 'preparing' && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
   const readyOrders = orders
-    .filter(o => o.status === 'ready')
+    .filter(o => o.status === 'ready' && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => (b.readyAt?.getTime() || 0) - (a.readyAt?.getTime() || 0));
 
   return (

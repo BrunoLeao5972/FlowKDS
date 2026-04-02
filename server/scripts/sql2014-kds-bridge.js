@@ -1,6 +1,8 @@
 const fs = require('fs/promises');
 const fsSync = require('fs');
 const path = require('path');
+const http = require('http');
+const https = require('https');
 const sql = require('mssql');
 
 const RUNTIME_DIR = process.pkg ? path.join(path.dirname(process.execPath), 'scripts') : __dirname;
@@ -163,6 +165,7 @@ function parseItemFromFlatRow(row) {
     name,
     quantity: Number.isFinite(quantityNumber) && quantityNumber > 0 ? quantityNumber : 1,
     notes: String(row.itemnotes ?? row.observacoes ?? row.notes ?? ''),
+    sectorId: row.sectorid != null ? String(row.sectorid).trim() : null,
   };
 }
 
@@ -289,26 +292,81 @@ async function callKdsApi(pathname, init = {}) {
     ...(init.headers || {}),
   };
 
-  const response = await fetch(url, {
-    ...init,
-    headers,
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`KDS API ${response.status} at ${pathname}: ${body}`);
-  }
-
-  if (response.status === 204) return null;
-  return response.json();
+  const method = String(init.method || 'GET').toUpperCase();
+  const body = init.body;
+  return httpRequestJson(url, { method, headers, body });
 }
 
-async function createOrderInKds(row) {
+function httpRequestJson(urlString, options = {}) {
+  return new Promise((resolve, reject) => {
+    let urlObj;
+    try {
+      urlObj = new URL(urlString);
+    } catch (error) {
+      reject(new Error(`invalid KDS_API_BASE URL: ${urlString}`));
+      return;
+    }
+
+    const client = urlObj.protocol === 'https:' ? https : http;
+    const req = client.request(
+      {
+        protocol: urlObj.protocol,
+        hostname: urlObj.hostname,
+        port: urlObj.port || (urlObj.protocol === 'https:' ? 443 : 80),
+        path: `${urlObj.pathname}${urlObj.search}`,
+        method: options.method || 'GET',
+        headers: options.headers || {},
+        timeout: Number(process.env.KDS_API_TIMEOUT_MS || 10000),
+      },
+      res => {
+        let raw = '';
+        res.setEncoding('utf8');
+        res.on('data', chunk => {
+          raw += chunk;
+        });
+        res.on('end', () => {
+          const status = Number(res.statusCode || 0);
+          if (status >= 200 && status < 300) {
+            if (status === 204 || !raw) {
+              resolve(null);
+              return;
+            }
+            try {
+              resolve(JSON.parse(raw));
+            } catch {
+              resolve(raw);
+            }
+            return;
+          }
+
+          reject(new Error(`KDS API ${status} at ${urlObj.pathname}: ${raw}`));
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error(`timeout reaching KDS API at ${urlObj.origin}`));
+    });
+
+    req.on('error', error => {
+      reject(new Error(`request to ${urlObj.origin} failed: ${error.message || error}`));
+    });
+
+    if (options.body) {
+      req.write(options.body);
+    }
+
+    req.end();
+  });
+}
+
+async function createOrderInKds(row, options = {}) {
   const payload = {
     number: Number(row.number),
     customerName: String(row.customername || ''),
     observations: String(row.observations || ''),
     items: parseItems(row.itemsjson),
+    suppressAutoPrint: options.suppressAutoPrint === true,
   };
 
   if (!payload.number || Number.isNaN(payload.number)) {
@@ -316,7 +374,7 @@ async function createOrderInKds(row) {
   }
 
   if (!payload.items.length) {
-    payload.items = [{ name: 'Pedido sem itens detalhados', quantity: 1, notes: '' }];
+    payload.items = [{ name: 'Pedido sem itens detalhados', quantity: 1, notes: '', sectorId: null }];
   }
 
   return callKdsApi('/orders', {
@@ -339,7 +397,7 @@ function parseUpdatedAt(value) {
   return parsed;
 }
 
-async function syncCycle(pool, state, queryText) {
+async function syncCycle(pool, state, queryText, options = {}) {
   const request = pool.request();
   request.input('lastSyncAt', sql.DateTime2, new Date(state.lastSyncAt));
 
@@ -380,6 +438,8 @@ async function syncCycle(pool, state, queryText) {
         observations: row.observations,
         itemsjson: row.items,
         externalid: externalId,
+      }, {
+        suppressAutoPrint: options.suppressAutoPrint === true,
       });
       kdsId = String(createdOrder.id);
       state.idMap[externalId] = kdsId;
@@ -411,6 +471,26 @@ async function syncCycle(pool, state, queryText) {
     skipped,
     lastSyncAt: state.lastSyncAt,
   };
+}
+
+async function syncSectors(pool) {
+  try {
+    const result = await pool.request().query('SELECT [C\u00f3digo], [Descri\u00e7\u00e3o] FROM Setores ORDER BY [C\u00f3digo]');
+    const rows = Array.isArray(result.recordset) ? result.recordset : [];
+    if (!rows.length) return;
+    const sectors = rows.map(r => ({
+      id: String(r['C\u00f3digo'] ?? r['CODIGO'] ?? r['codigo'] ?? '').trim(),
+      name: String(r['Descri\u00e7\u00e3o'] ?? r['DESCRICAO'] ?? r['descricao'] ?? r['Nome'] ?? r['NOME'] ?? r['nome'] ?? '').trim(),
+    })).filter(s => s.id);
+    if (!sectors.length) return;
+    await callKdsApi('/sectors/sync', {
+      method: 'POST',
+      body: JSON.stringify({ sectors }),
+    });
+    console.log(`[sql2014-bridge] setores sincronizados: ${sectors.length}`);
+  } catch (err) {
+    console.warn('[sql2014-bridge] falha ao sincronizar setores:', err.message || err);
+  }
 }
 
 async function validateConfig(queryText) {
@@ -445,16 +525,26 @@ async function main() {
   console.log(`[sql2014-bridge] using state file: ${STATE_FILE}`);
   console.log(`[sql2014-bridge] polling every ${POLL_INTERVAL_MS} ms`);
 
+  // Sincroniza setores na inicializãção e depois a cada 5 minutos.
+  await syncSectors(pool);
+  setInterval(() => syncSectors(pool), 5 * 60 * 1000);
+
+  let isInitialCycle = true;
+
   const runOnce = async () => {
     try {
-      const result = await syncCycle(pool, state, queryText);
+      const result = await syncCycle(pool, state, queryText, {
+        suppressAutoPrint: isInitialCycle,
+      });
       if (result.processed > 0 || result.skipped > 0) {
         console.log(
           `[sql2014-bridge] processed=${result.processed} created=${result.created} updated=${result.updated} skipped=${result.skipped} lastSyncAt=${result.lastSyncAt}`
         );
       }
+      isInitialCycle = false;
     } catch (error) {
       console.error('[sql2014-bridge] cycle failed:', error.message || error);
+      isInitialCycle = false;
     }
   };
 

@@ -6,6 +6,14 @@ const orderItemSchema = new mongoose.Schema(
     name: { type: String, required: true },
     quantity: { type: Number, required: true, min: 1, default: 1 },
     notes: { type: String, default: '' },
+    /** ID do setor ao qual este produto pertence (coluna setor da vwpedidosprodutos). */
+    sectorId: { type: String, default: null },
+    /** Status individual do item na cozinha: aguardando preparo, em preparo ou pronto. */
+    itemStatus: {
+      type: String,
+      enum: ['waiting', 'preparing', 'ready'],
+      default: 'waiting',
+    },
   },
   { _id: false }
 );
