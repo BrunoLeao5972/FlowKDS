@@ -48,12 +48,26 @@ interface ConfigDialogProps {
     readyEnabled: boolean,
     printerName: string,
     printSize: '58mm' | '80mm' | 'A4',
-    printScale: number
+    printScale: number,
+    serviceModes: ServiceMode[]
   ) => void;
   ThemeToggle: React.ReactNode;
   orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
   customStartNumber: number;
+  enabledServiceModes: ServiceMode[];
 }
+
+type ServiceMode = 'balcao' | 'mesa' | 'cartao' | 'delivery' | 'encomenda' | 'servico' | 'apartamento';
+
+const SERVICE_MODE_OPTIONS: Array<{ id: ServiceMode; label: string }> = [
+  { id: 'balcao', label: 'Balcao' },
+  { id: 'mesa', label: 'Mesa' },
+  { id: 'cartao', label: 'Cartao' },
+  { id: 'delivery', label: 'Delivery' },
+  { id: 'encomenda', label: 'Encomenda' },
+  { id: 'servico', label: 'Servico' },
+  { id: 'apartamento', label: 'Apartamento' },
+];
 
 /** Representa um usuário cadastrado no banco, retornado pela API /users. */
 interface UserData {
@@ -138,13 +152,14 @@ interface OperationalReportData {
   };
 }
 
-export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, orderNumberMode, customStartNumber, onSave, ThemeToggle }: ConfigDialogProps) {
+export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, orderNumberMode, customStartNumber, enabledServiceModes, onSave, ThemeToggle }: ConfigDialogProps) {
   // Controla qual aba está ativa na navegação principal
   const [activeTab, setActiveTab] = useState<'restaurant' | 'users'>('restaurant');
 
   // Flags para os painéis que substituem o conteúdo das abas principais
   const [showUsersPanel, setShowUsersPanel] = useState(false);
   const [showPermissionsPanel, setShowPermissionsPanel] = useState(false);
+  const [showServiceModesPanel, setShowServiceModesPanel] = useState(false);
   const [showReportsPanel, setShowReportsPanel] = useState(false);
   const [showSupportPanel, setShowSupportPanel] = useState(false);
 
@@ -202,6 +217,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
   const [readyEnabled, setReadyEnabled] = useState<boolean>(settings.readyOrderSoundEnabled ?? true);
   const [printerName, setPrinterName] = useState(settings.printerName || '');
   const [printSize, setPrintSize] = useState<'58mm' | '80mm' | 'A4'>(settings.printSize || '80mm');
+  const [selectedServiceModes, setSelectedServiceModes] = useState<ServiceMode[]>(
+    Array.isArray(enabledServiceModes) && enabledServiceModes.length ? enabledServiceModes : SERVICE_MODE_OPTIONS.map(mode => mode.id)
+  );
+  const [serviceModeToAdd, setServiceModeToAdd] = useState('');
 
   // Lista de usuários carregada da API e paginação dos painéis de Usuários e Permissões
   const [users, setUsers] = useState<UserData[]>([]);
@@ -241,7 +260,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
 
   const formatCookName = (name: string) => {
     const raw = String(name || '').trim();
-    if (!raw || raw.toLowerCase() === 'unassigned') return 'Nao atribuido';
+    if (!raw || raw.toLowerCase() === 'unassigned') return 'Não atribuído';
     return formatDisplayName(raw);
   };
 
@@ -848,6 +867,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
       setActiveTab('restaurant');
       setShowUsersPanel(false);
       setShowPermissionsPanel(false);
+      setShowServiceModesPanel(false);
       setShowReportsPanel(false);
       setShowSupportPanel(false);
       return;
@@ -858,6 +878,17 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
       setActiveTab('restaurant');
       setShowUsersPanel(false);
       setShowPermissionsPanel(false);
+      setShowServiceModesPanel(false);
+      setShowReportsPanel(false);
+      setShowSupportPanel(false);
+      return;
+    }
+
+    if (selectedServiceModes.length === 0) {
+      setRestaurantError('Selecione pelo menos uma modalidade para usar no KDS.');
+      setShowUsersPanel(false);
+      setShowPermissionsPanel(false);
+      setShowServiceModesPanel(true);
       setShowReportsPanel(false);
       setShowSupportPanel(false);
       return;
@@ -886,8 +917,26 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
       readyEnabled,
       printerName.trim(),
       printSize,
-      115
+      115,
+      selectedServiceModes
     );
+  };
+
+  const getServiceModeLabel = (mode: ServiceMode) => {
+    const found = SERVICE_MODE_OPTIONS.find(option => option.id === mode);
+    return found?.label || mode;
+  };
+
+  const handleAddServiceMode = () => {
+    const mode = String(serviceModeToAdd || '').trim().toLowerCase() as ServiceMode;
+    if (!mode) return;
+    if (selectedServiceModes.includes(mode)) return;
+    setSelectedServiceModes(prev => [...prev, mode]);
+    setServiceModeToAdd('');
+  };
+
+  const handleRemoveServiceMode = (mode: ServiceMode) => {
+    setSelectedServiceModes(prev => prev.filter(item => item !== mode));
   };
 
   return (
@@ -898,19 +947,20 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
           <div className="p-4 pb-2">
             <h2 className="font-bold text-lg">Configurações</h2>
           </div>
-          <div className="flex gap-2 px-4 pb-2 overflow-x-auto whitespace-nowrap">
+          <div className="flex gap-2 px-4 pb-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {tabs.map(tab => (
               <button
                 key={tab.id}
                 onClick={() => {
                   setShowUsersPanel(false);
                   setShowPermissionsPanel(false);
+                  setShowServiceModesPanel(false);
                   setShowReportsPanel(false);
                   setShowSupportPanel(false);
                   setActiveTab(tab.id);
                 }}
                 className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
-                  !showUsersPanel && !showPermissionsPanel && !showReportsPanel && !showSupportPanel && activeTab === tab.id
+                  !showUsersPanel && !showPermissionsPanel && !showServiceModesPanel && !showReportsPanel && !showSupportPanel && activeTab === tab.id
                     ? 'bg-orange-400 text-white'
                     : 'bg-muted text-muted-foreground hover:bg-orange-100'
                 }`}
@@ -923,6 +973,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
               type="button"
               onClick={() => {
                 setShowPermissionsPanel(false);
+                setShowServiceModesPanel(false);
                 setShowReportsPanel(false);
                 setShowSupportPanel(false);
                 setShowUsersPanel(true);
@@ -941,6 +992,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
               type="button"
               onClick={() => {
                 setShowUsersPanel(false);
+                setShowServiceModesPanel(false);
                 setShowReportsPanel(false);
                 setShowSupportPanel(false);
                 setShowPermissionsPanel(true);
@@ -960,6 +1012,26 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
               onClick={() => {
                 setShowUsersPanel(false);
                 setShowPermissionsPanel(false);
+                setShowReportsPanel(false);
+                setShowSupportPanel(false);
+                setShowServiceModesPanel(true);
+                setActiveTab('users');
+              }}
+              className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
+                showServiceModesPanel
+                  ? 'bg-orange-400 text-white'
+                  : 'bg-muted text-muted-foreground hover:bg-orange-100'
+              }`}
+            >
+              Modalidades
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowUsersPanel(false);
+                setShowPermissionsPanel(false);
+                setShowServiceModesPanel(false);
                 setShowSupportPanel(false);
                 setShowReportsPanel(true);
                 setActiveTab('users');
@@ -978,6 +1050,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
               onClick={() => {
                 setShowUsersPanel(false);
                 setShowPermissionsPanel(false);
+                setShowServiceModesPanel(false);
                 setShowReportsPanel(false);
                 setShowSupportPanel(true);
                 setActiveTab('users');
@@ -996,7 +1069,106 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
         {/* Conteúdo das Abas */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {!showUsersPanel && activeTab === 'restaurant' && (
-            <div className="space-y-3 max-w-xl">
+            <div className="space-y-3 max-w-2xl">
+              <div className="rounded-md border border-border bg-muted/10 p-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2.5">
+                  <div className="md:col-span-1">
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Nome fantasia</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantTradeName}
+                      onChange={e => setRestaurantTradeName(e.target.value)}
+                      placeholder="Ex: Restaurante Durangos Burger"
+                    />
+                  </div>
+                  <div className="md:col-span-1">
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">CNPJ</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantCnpj}
+                      onChange={e => {
+                        setRestaurantCnpj(formatCnpj(e.target.value));
+                        if (restaurantError) setRestaurantError('');
+                      }}
+                      placeholder="00.000.000/0000-00"
+                      inputMode="numeric"
+                      maxLength={18}
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Razão social</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantLegalName}
+                      onChange={e => setRestaurantLegalName(e.target.value)}
+                      placeholder="Ex: Restaurante Durangos Burger LTDA"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Endereço</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantStreet}
+                      onChange={e => setRestaurantStreet(e.target.value)}
+                      placeholder="Rua/Avenida"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Número</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantNumber}
+                      onChange={e => setRestaurantNumber(e.target.value)}
+                      placeholder="Ex: 120"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">CEP</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantCep}
+                      onChange={e => {
+                        setRestaurantCep(formatCep(e.target.value));
+                        if (restaurantError) setRestaurantError('');
+                      }}
+                      placeholder="00000-000"
+                      inputMode="numeric"
+                      maxLength={9}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Cidade/UF</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantCity}
+                      onChange={e => setRestaurantCity(e.target.value)}
+                      placeholder="Ex: Fortaleza"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Complemento</label>
+                    <input
+                      type="text"
+                      className="input w-full h-8 rounded-md text-sm"
+                      value={restaurantComplement}
+                      onChange={e => setRestaurantComplement(e.target.value)}
+                      placeholder="Ex: Sala 02, Fundos"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">Tema do sistema</p>
@@ -1024,111 +1196,13 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                 </div>
               </div>
 
-              <div>
-                <label className="block mb-1.5 text-sm font-medium">Nome fantasia:</label>
-                <input
-                  type="text"
-                  className="input w-full h-9 rounded-md text-sm"
-                  value={restaurantTradeName}
-                  onChange={e => setRestaurantTradeName(e.target.value)}
-                  placeholder="Ex: Restaurante Durangos Burger"
-                />
-              </div>
-              <div>
-                <label className="block mb-1.5 text-sm font-medium">Razão social:</label>
-                <input
-                  type="text"
-                  className="input w-full h-9 rounded-md text-sm"
-                  value={restaurantLegalName}
-                  onChange={e => setRestaurantLegalName(e.target.value)}
-                  placeholder="Ex: Restaurante Durangos Burger LTDA"
-                />
-              </div>
-              <div>
-                <label className="block mb-1.5 text-sm font-medium">CNPJ:</label>
-                <input
-                  type="text"
-                  className="input w-full h-9 rounded-md text-sm"
-                  value={restaurantCnpj}
-                  onChange={e => {
-                    setRestaurantCnpj(formatCnpj(e.target.value));
-                    if (restaurantError) setRestaurantError('');
-                  }}
-                  placeholder="00.000.000/0000-00"
-                  inputMode="numeric"
-                  maxLength={18}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block mb-1.5 text-sm font-medium">CEP:</label>
-                  <input
-                    type="text"
-                    className="input w-full h-9 rounded-md text-sm"
-                    value={restaurantCep}
-                    onChange={e => {
-                      setRestaurantCep(formatCep(e.target.value));
-                      if (restaurantError) setRestaurantError('');
-                    }}
-                    placeholder="00000-000"
-                    inputMode="numeric"
-                    maxLength={9}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1.5 text-sm font-medium">Número:</label>
-                  <input
-                    type="text"
-                    className="input w-full h-9 rounded-md text-sm"
-                    value={restaurantNumber}
-                    onChange={e => setRestaurantNumber(e.target.value)}
-                    placeholder="Ex: 120"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block mb-1.5 text-sm font-medium">Endereço:</label>
-                <input
-                  type="text"
-                  className="input w-full h-9 rounded-md text-sm"
-                  value={restaurantStreet}
-                  onChange={e => setRestaurantStreet(e.target.value)}
-                  placeholder="Rua/Avenida"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block mb-1.5 text-sm font-medium">Cidade/UF:</label>
-                  <input
-                    type="text"
-                    className="input w-full h-9 rounded-md text-sm"
-                    value={restaurantCity}
-                    onChange={e => setRestaurantCity(e.target.value)}
-                    placeholder="Ex: Fortaleza"
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1.5 text-sm font-medium">Complemento:</label>
-                  <input
-                    type="text"
-                    className="input w-full h-9 rounded-md text-sm"
-                    value={restaurantComplement}
-                    onChange={e => setRestaurantComplement(e.target.value)}
-                    placeholder="Ex: Sala 02, Fundos"
-                  />
-                </div>
-              </div>
-
               {restaurantError && <p className="text-sm text-red-600">{restaurantError}</p>}
 
               <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
                 <p className="text-sm font-medium">Timer e Impressao</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block mb-1.5 text-sm font-medium">Tempo medio (min):</label>
+                    <label className="block mb-1.5 text-sm font-medium">Tempo médio (min):</label>
                     <input
                       type="number"
                       className="input no-spinner w-full h-9 rounded-md text-sm"
@@ -1311,6 +1385,63 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
             </div>
           )}
 
+          {/* TAB: MODALIDADES */}
+          {showServiceModesPanel && (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-base">Modalidades no KDS</h3>
+              <p className="text-sm text-muted-foreground">Selecione quais modalidades do caixa podem entrar no fluxo do KDS.</p>
+
+              <div className="rounded-md border border-border bg-background p-3 space-y-2">
+                <p className="text-xs font-medium">Modalidades habilitadas para atendimento:</p>
+
+                <div className="flex gap-2">
+                  <select
+                    className="input h-8 text-xs flex-1"
+                    value={serviceModeToAdd}
+                    onChange={e => setServiceModeToAdd(e.target.value)}
+                  >
+                    <option value="">Selecione uma modalidade...</option>
+                    {SERVICE_MODE_OPTIONS
+                      .filter(mode => !selectedServiceModes.includes(mode.id))
+                      .map(mode => (
+                        <option key={mode.id} value={mode.id}>{mode.label}</option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAddServiceMode}
+                    disabled={!serviceModeToAdd}
+                    className="h-8 px-2 rounded-md border border-orange-300 text-orange-700 text-xs font-semibold disabled:opacity-50"
+                  >
+                    Adicionar
+                  </button>
+                </div>
+
+                <div className="min-h-8 flex flex-wrap gap-1">
+                  {selectedServiceModes.length === 0 ? (
+                    <span className="text-[11px] text-muted-foreground">Nenhuma modalidade habilitada.</span>
+                  ) : (
+                    selectedServiceModes.map(mode => (
+                      <span key={mode} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-xs font-medium">
+                        {getServiceModeLabel(mode)}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveServiceMode(mode)}
+                          className="text-orange-700 hover:text-orange-900"
+                          title="Remover modalidade"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground">Use este filtro para aceitar no KDS apenas pedidos das modalidades selecionadas.</p>
+            </div>
+          )}
+
           {/* TAB: RELATÓRIOS */}
           {showReportsPanel && (
             <div className="space-y-4">
@@ -1418,7 +1549,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                     <div className="rounded-lg border border-orange-200 dark:border-orange-800/40 bg-card p-3 shadow-sm">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[11px] uppercase tracking-wide text-orange-700/80">Tempo médio</p>
-                        <HelpHint position="right" text="Media de minutos entre inicio e finalizacao do preparo no periodo selecionado." />
+                        <HelpHint position="right" text="Média de minutos entre início e finalização do preparo no período selecionado." />
                       </div>
                       <p className="text-2xl font-black text-orange-900">{Math.round(reportData.operationalReports?.preparation?.averagePrepTimeMin ?? 0)}</p>
                       <p className="text-xs text-muted-foreground">min de preparo</p>
@@ -1426,7 +1557,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                     <div className="rounded-lg border border-red-200 dark:border-red-800/40 bg-card p-3 shadow-sm">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[11px] uppercase tracking-wide text-red-700/80">Cancelamento</p>
-                        <HelpHint text="Percentual de pedidos cancelados sobre o total de pedidos no periodo." />
+                        <HelpHint text="Percentual de pedidos cancelados sobre o total de pedidos no período." />
                       </div>
                       <p className="text-2xl font-black text-red-700">{(reportData.operationalReports?.cancellations?.cancellationRatePct ?? 0).toFixed(1)}%</p>
                       <p className="text-xs text-muted-foreground">taxa no período</p>
@@ -1434,7 +1565,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                     <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/40 bg-card p-3 shadow-sm">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[11px] uppercase tracking-wide text-emerald-700/80">SLA</p>
-                        <HelpHint text="Percentual de pedidos concluidos dentro do tempo de SLA configurado." />
+                        <HelpHint text="Percentual de pedidos concluídos dentro do tempo de SLA configurado." />
                       </div>
                       <p className="text-2xl font-black text-emerald-700">{(reportData.performanceMetrics?.slaWithinPct ?? 0).toFixed(1)}%</p>
                       <p className="text-xs text-muted-foreground">pedidos dentro</p>
@@ -1442,7 +1573,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                     <div className="rounded-lg border border-amber-200 dark:border-amber-800/40 bg-card p-3 shadow-sm">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[11px] uppercase tracking-wide text-amber-700/80">Atrasos</p>
-                        <HelpHint text="Quantidade de pedidos que ultrapassaram o tempo de SLA no periodo." />
+                        <HelpHint text="Quantidade de pedidos que ultrapassaram o tempo de SLA no período." />
                       </div>
                       <p className="text-2xl font-black text-amber-700">{reportData.performanceMetrics?.delayedOrders ?? 0}</p>
                       <p className="text-xs text-muted-foreground">pedidos atrasados</p>
@@ -1498,7 +1629,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                   <div className="rounded-lg border border-border bg-card p-4 space-y-3">
                     <div className="flex items-center justify-between gap-2">
                       <h4 className="text-sm font-bold">Produtividade por cozinheiro</h4>
-                      <HelpHint text="Desempenho por cozinheiro: volume, tempo medio de preparo e taxa de atraso no periodo." />
+                      <HelpHint text="Desempenho por cozinheiro: volume, tempo médio de preparo e taxa de atraso no período." />
                     </div>
                     {(reportData.teamProductivity?.byCook || []).length === 0 ? (
                       <p className="text-sm text-muted-foreground">Sem dados por cozinheiro no período.</p>

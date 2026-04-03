@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 
 type OrderNumberMode = 'continuous' | 'daily-reset' | 'custom-start';
 type PrintSize = '58mm' | '80mm' | 'A4';
+export type ServiceMode = 'balcao' | 'mesa' | 'cartao' | 'delivery' | 'encomenda' | 'servico' | 'apartamento';
+
+const ALL_SERVICE_MODES: ServiceMode[] = ['balcao', 'mesa', 'cartao', 'delivery', 'encomenda', 'servico', 'apartamento'];
 
 type Settings = {
   tempoMedio: number;
@@ -29,6 +32,7 @@ type Settings = {
   orderNumberMode: OrderNumberMode;
   customStartNumber: number;
   lastResetDate: string | null; // ISO date (YYYY-MM-DD)
+  enabledServiceModes: ServiceMode[];
   setTempoMedio: (v: number) => void;
   setTempoAlerta: (v: number) => void;
   setTempoCritico: (v: number) => void;
@@ -51,6 +55,7 @@ type Settings = {
   setPrintScale: (scale: number) => void;
   setOrderNumberMode: (m: OrderNumberMode) => void;
   setCustomStartNumber: (n: number) => void;
+  setEnabledServiceModes: (modes: ServiceMode[]) => void;
   // kitchen animations toggle
   animationsEnabled: boolean;
   setAnimationsEnabled: (v: boolean) => void;
@@ -87,6 +92,7 @@ const defaultValues: Settings = {
   orderNumberMode: 'continuous',
   customStartNumber: 100,
   lastResetDate: null,
+  enabledServiceModes: [...ALL_SERVICE_MODES],
   setTempoMedio: () => {},
   setTempoAlerta: () => {},
   setTempoCritico: () => {},
@@ -109,6 +115,7 @@ const defaultValues: Settings = {
   setPrintScale: () => {},
   setOrderNumberMode: () => {},
   setCustomStartNumber: () => {},
+  setEnabledServiceModes: () => {},
   animationsEnabled: true,
   setAnimationsEnabled: () => {},
   computeNextNumber: () => 101,
@@ -154,6 +161,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [orderNumberMode, setOrderNumberMode] = useState<OrderNumberMode>(defaultValues.orderNumberMode);
   const [customStartNumber, setCustomStartNumber] = useState<number>(defaultValues.customStartNumber);
   const [lastResetDate, setLastResetDate] = useState<string | null>(defaultValues.lastResetDate);
+  const [enabledServiceModes, setEnabledServiceModes] = useState<ServiceMode[]>(defaultValues.enabledServiceModes);
   const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(true);
 
   // persist/load
@@ -186,6 +194,12 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (parsed.orderNumberMode) setOrderNumberMode(parsed.orderNumberMode);
         if (typeof parsed.customStartNumber === 'number') setCustomStartNumber(parsed.customStartNumber);
         if (parsed.lastResetDate) setLastResetDate(parsed.lastResetDate);
+        if (Array.isArray(parsed.enabledServiceModes)) {
+          const normalizedModes = parsed.enabledServiceModes
+            .map((mode: unknown) => String(mode || '').trim().toLowerCase())
+            .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
+          setEnabledServiceModes(normalizedModes.length ? [...new Set(normalizedModes)] : [...ALL_SERVICE_MODES]);
+        }
         if (parsed.newOrderSound) setNewOrderSound(parsed.newOrderSound);
         if (parsed.readyOrderSound) setReadyOrderSound(parsed.readyOrderSound);
         if (typeof parsed.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(parsed.newOrderSoundEnabled);
@@ -246,6 +260,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
       orderNumberMode,
       customStartNumber,
       lastResetDate,
+      enabledServiceModes,
       newOrderSound,
       readyOrderSound,
       newOrderSoundEnabled,
@@ -274,6 +289,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     orderNumberMode,
     customStartNumber,
     lastResetDate,
+    enabledServiceModes,
     newOrderSound,
     readyOrderSound,
     newOrderSoundEnabled,
@@ -354,6 +370,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         orderNumberMode,
         customStartNumber,
         lastResetDate,
+        enabledServiceModes,
         setTempoMedio,
         setTempoAlerta,
         setTempoCritico,
@@ -369,6 +386,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         setLicenseContent,
         setOrderNumberMode,
         setCustomStartNumber,
+        setEnabledServiceModes,
         animationsEnabled,
         setAnimationsEnabled,
         computeNextNumber,

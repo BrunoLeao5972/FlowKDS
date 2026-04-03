@@ -259,12 +259,50 @@ io.use(async (socket, next) => {
 const VALID_STATUSES = ['received', 'preparing', 'ready', 'delivered', 'cancelled'];
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+const ALLOWED_STATUS_TRANSITIONS = {
+  received: ['preparing', 'cancelled'],
+  preparing: ['received', 'ready', 'cancelled'],
+  ready: ['preparing', 'delivered', 'cancelled'],
+  delivered: ['ready'],
+  cancelled: ['received'],
+};
+
+function canTransitionOrderStatus(fromStatus, toStatus) {
+  if (!fromStatus || !toStatus) return false;
+  if (fromStatus === toStatus) return true;
+  const allowedTargets = ALLOWED_STATUS_TRANSITIONS[fromStatus] || [];
+  return allowedTargets.includes(toStatus);
+}
+
 function normalizeSectorIds(rawSectorIds) {
   if (!Array.isArray(rawSectorIds)) return [];
   const cleaned = rawSectorIds
     .map(value => String(value || '').trim())
     .filter(Boolean);
   return [...new Set(cleaned)];
+}
+
+function normalizeServiceMode(rawServiceMode) {
+  const normalized = String(rawServiceMode || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (!normalized) return null;
+
+  const map = {
+    balcao: 'balcao',
+    mesa: 'mesa',
+    cartao: 'cartao',
+    delivery: 'delivery',
+    entrega: 'delivery',
+    encomenda: 'encomenda',
+    servico: 'servico',
+    apartamento: 'apartamento',
+  };
+
+  return map[normalized] || null;
 }
 
 function normalizePermissions(rawPermissions) {
@@ -1247,6 +1285,14 @@ if (fs.existsSync(DIST)) {
 
 app.post('/orders', asyncHandler(async (req, res) => {
   const { number, customerName, items, observations, cookId, suppressAutoPrint } = req.body;
+  const attendant = String(req.body?.attendant || req.body?.waiter || req.body?.garcom || req.body?.atendente || '').trim() || null;
+  const serviceMode = normalizeServiceMode(
+    req.body?.serviceMode
+    ?? req.body?.modalidade
+    ?? req.body?.modality
+    ?? req.body?.attendanceMode
+    ?? req.body?.tipoAtendimento
+  );
   // number e items são obrigatórios; customerName pode ser vazio.
   if (!number || !Array.isArray(items)) {
     return res.status(400).json({ error: 'invalid_payload' });
@@ -1258,6 +1304,8 @@ app.post('/orders', asyncHandler(async (req, res) => {
     id,
     number,
     customerName: customerName || '',
+    serviceMode,
+    attendant,
     observations: observations || '',
     status: 'received',
     createdAt: now,
@@ -1291,7 +1339,9 @@ app.post('/orders', asyncHandler(async (req, res) => {
   res.status(201).json(toISO(order));
   io.emit('orders:created', toISO(order));
 
-  if (PRINT_PEDIDO_AUTO_ENABLED && !suppressAutoPrint) {
+  const isMesaOrder = serviceMode === 'mesa';
+
+  if (PRINT_PEDIDO_AUTO_ENABLED && !suppressAutoPrint && !isMesaOrder) {
     console.log(`[print-pedido] AUTO_ENABLED ativada - tentando imprimir pedido #${order.number}`);
     setImmediate(async () => {
       try {
@@ -1334,13 +1384,15 @@ app.post('/orders', asyncHandler(async (req, res) => {
     });
   } else if (PRINT_PEDIDO_AUTO_ENABLED && suppressAutoPrint) {
     console.log(`[print-pedido] Impressao automatica ignorada no pedido #${order.number} (suppressAutoPrint=true)`);
+  } else if (PRINT_PEDIDO_AUTO_ENABLED && isMesaOrder) {
+    console.log(`[print-pedido] Impressao automatica ignorada no pedido #${order.number} (serviceMode=mesa)`);
   }
 }));
 
 // Atualiza o status individual de um item dentro de um pedido.
 app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
   const { id, itemId } = req.params;
-  const { itemStatus } = req.body || {};
+  const { itemStatus, itemIndex } = req.body || {};
   const VALID_ITEM_STATUSES = ['waiting', 'preparing', 'ready'];
   if (!itemStatus || !VALID_ITEM_STATUSES.includes(itemStatus)) {
     return res.status(400).json({ error: 'invalid_item_status' });
@@ -1349,17 +1401,67 @@ app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
   const order = await Order.findOne({ tenantId: LEGACY_TENANT_ID, id }).lean();
   if (!order) return res.status(404).json({ error: 'not_found' });
 
-  const itemIndex = order.items.findIndex(it => it.id === itemId);
-  if (itemIndex === -1) return res.status(404).json({ error: 'item_not_found' });
+  const parsedItemIndex = Number(itemIndex);
+  const hasValidItemIndex = Number.isInteger(parsedItemIndex)
+    && parsedItemIndex >= 0
+    && parsedItemIndex < order.items.length;
+
+  const targetIndex = hasValidItemIndex
+    ? parsedItemIndex
+    : order.items.findIndex(it => it.id === itemId);
+
+  if (targetIndex === -1) return res.status(404).json({ error: 'item_not_found' });
 
   const now = Date.now();
   const updatedItems = order.items.map((it, idx) =>
-    idx === itemIndex ? { ...it, itemStatus } : it
+    idx === targetIndex ? { ...it, itemStatus } : it
   );
+
+  const normalizedItemStatuses = updatedItems.map(it => {
+    if (it.itemStatus === 'ready') return 'ready';
+    if (it.itemStatus === 'preparing') return 'preparing';
+    return 'waiting';
+  });
+
+  const allItemsReady = normalizedItemStatuses.length > 0 && normalizedItemStatuses.every(status => status === 'ready');
+  const anyItemInProgress = normalizedItemStatuses.some(status => status === 'preparing' || status === 'ready');
+
+  let derivedOrderStatus = order.status;
+  if (order.status !== 'cancelled' && order.status !== 'delivered' && order.status !== 'ready') {
+    // "ready" só é atingido manualmente via PATCH /status (comanda completa).
+    // Aqui apenas deriva entre received <-> preparing.
+    if (anyItemInProgress) {
+      derivedOrderStatus = 'preparing';
+    } else {
+      derivedOrderStatus = 'received';
+    }
+  }
+
+  const patch = {
+    items: updatedItems,
+    updatedAt: now,
+    status: derivedOrderStatus,
+  };
+
+  if (derivedOrderStatus === 'preparing') {
+    if (!order.acceptedAt) patch.acceptedAt = now;
+    if (!order.startedAt) patch.startedAt = now;
+    if (!order.prepareStartedAt) patch.prepareStartedAt = now;
+    if (order.status !== 'preparing') {
+      patch.startedAtHistory = [...(order.startedAtHistory || []), now];
+    }
+  }
+
+  if (derivedOrderStatus !== order.status) {
+    patch.stageEvents = [
+      ...(order.stageEvents || []),
+      { status: derivedOrderStatus, at: now, cookId: order.cookId || null },
+    ];
+  }
 
   const updated = await Order.findOneAndUpdate(
     { tenantId: LEGACY_TENANT_ID, id },
-    { items: updatedItems, updatedAt: now },
+    patch,
     { new: true, lean: true }
   );
   if (!updated) return res.status(404).json({ error: 'not_found' });
@@ -1375,6 +1477,15 @@ app.patch('/orders/:id/status', asyncHandler(async (req, res) => {
 
   const order = await Order.findOne({ tenantId: LEGACY_TENANT_ID, id }).lean();
   if (!order) return res.status(404).json({ error: 'not_found' });
+
+  if (!canTransitionOrderStatus(order.status, status)) {
+    return res.status(409).json({
+      error: 'invalid_status_transition',
+      from: order.status,
+      to: status,
+      allowed: ALLOWED_STATUS_TRANSITIONS[order.status] || [],
+    });
+  }
 
   const authPermissions = req.authUser?.permissions || [];
   const actorCookId = authPermissions.includes('kitchen') ? req.authUser?.username : null;
@@ -1399,6 +1510,9 @@ app.patch('/orders/:id/status', asyncHandler(async (req, res) => {
 
   const now = Date.now();
   const patch = { status, updatedAt: now };
+  if (status === 'received') {
+    patch.items = (order.items || []).map(it => ({ ...it, itemStatus: 'waiting' }));
+  }
   if (status === 'preparing') {
     if (!order.acceptedAt) patch.acceptedAt = now;
     if (!order.startedAt) patch.startedAt = now;
@@ -1454,6 +1568,26 @@ app.put('/orders/:id', asyncHandler(async (req, res) => {
   if (!existing) return res.status(404).json({ error: 'not_found' });
 
   const { number, customerName, items, observations, status, cookId } = req.body;
+  const attendant = req.body?.attendant !== undefined
+    ? (String(req.body.attendant || '').trim() || null)
+    : existing.attendant;
+  const hasServiceModePayload = [
+    'serviceMode',
+    'modalidade',
+    'modality',
+    'attendanceMode',
+    'tipoAtendimento',
+  ].some(key => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+
+  const serviceMode = hasServiceModePayload
+    ? normalizeServiceMode(
+      req.body?.serviceMode
+      ?? req.body?.modalidade
+      ?? req.body?.modality
+      ?? req.body?.attendanceMode
+      ?? req.body?.tipoAtendimento
+    )
+    : (existing.serviceMode || null);
   if (typeof number !== 'number' || !customerName || !Array.isArray(items)) {
     return res.status(400).json({ error: 'invalid_payload' });
   }
@@ -1461,13 +1595,44 @@ app.put('/orders/:id', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'invalid_status' });
   }
 
+  const nextStatus = status || existing.status;
+  if (!canTransitionOrderStatus(existing.status, nextStatus)) {
+    return res.status(409).json({
+      error: 'invalid_status_transition',
+      from: existing.status,
+      to: nextStatus,
+      allowed: ALLOWED_STATUS_TRANSITIONS[existing.status] || [],
+    });
+  }
+
   const now = Date.now();
   const patch = {
     number,
     customerName,
-    items: items.map(it => ({ id: it.id || crypto.randomUUID(), name: it.name, quantity: it.quantity || 1, notes: it.notes || '' })),
+    serviceMode,
+    attendant,
+    items: items.map((it, idx) => {
+      const existingItem = Array.isArray(existing.items) ? existing.items[idx] : null;
+      const rawSector = it.sectorId ?? it.sector ?? it.setorId ?? it.setorid ?? it.setor ?? existingItem?.sectorId;
+      const normalizedSector = rawSector === undefined || rawSector === null || rawSector === ''
+        ? null
+        : String(rawSector).trim();
+
+      const normalizedItemStatus = nextStatus === 'received'
+        ? 'waiting'
+        : (it.itemStatus || existingItem?.itemStatus || 'waiting');
+
+      return {
+        id: it.id || existingItem?.id || crypto.randomUUID(),
+        name: it.name,
+        quantity: it.quantity || 1,
+        notes: it.notes || '',
+        sectorId: normalizedSector,
+        itemStatus: normalizedItemStatus,
+      };
+    }),
     observations: observations || '',
-    status: status || existing.status,
+    status: nextStatus,
     updatedAt: now,
     cookId: cookId || existing.cookId || null,
   };

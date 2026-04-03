@@ -24,6 +24,13 @@ const orderSchema = new mongoose.Schema(
     id: { type: String, required: true, index: true },
     number: { type: Number, required: true },
     customerName: { type: String, default: '' },
+    serviceMode: {
+      type: String,
+      enum: ['balcao', 'mesa', 'cartao', 'delivery', 'encomenda', 'servico', 'apartamento', null],
+      default: null,
+      index: true,
+    },
+    attendant: { type: String, default: null },
     observations: { type: String, default: '' },
     status: {
       type: String,

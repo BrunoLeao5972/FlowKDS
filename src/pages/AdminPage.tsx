@@ -1,6 +1,6 @@
 import { useOrders } from '@/contexts/OrderContext';
-import { Order, OrderStatus, STATUS_LABELS } from '@/types/order';
-import { useEffect, useState } from 'react';
+import { Order, OrderStatus, STATUS_LABELS, OrderItem, ItemStatus } from '@/types/order';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, ChefHat, CheckCircle2, Package, XCircle, Search, Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,7 @@ const PREV_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
 };
 
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 20, 25, 30] as const;
-const RECENT_WINDOW_HOURS = 3;
+const RECENT_HOURS_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 24] as const;
 
 function formatItemNote(raw?: string) {
   const text = String(raw || '').trim();
@@ -49,12 +49,58 @@ function isWithinLastHours(date: Date, hours: number): boolean {
   return Date.now() - date.getTime() <= hours * 60 * 60 * 1000;
 }
 
-function isRecentOrder(order: Order): boolean {
+function getOrderReferenceDate(order: Order): Date {
   if (order.status === 'delivered') {
-    const deliveredAt = order.deliveredAt || order.updatedAt || order.createdAt;
-    return isWithinLastHours(deliveredAt, RECENT_WINDOW_HOURS);
+    return order.deliveredAt || order.updatedAt || order.createdAt;
   }
-  return isWithinLastHours(order.createdAt, RECENT_WINDOW_HOURS);
+
+  return order.createdAt;
+}
+
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isOnDate(date: Date, yyyyMmDd: string): boolean {
+  const [year, month, day] = yyyyMmDd.split('-').map(Number);
+  if (!year || !month || !day) return true;
+
+  return (
+    date.getFullYear() === year
+    && date.getMonth() + 1 === month
+    && date.getDate() === day
+  );
+}
+
+function isWithinDateRange(date: Date, fromYyyyMmDd: string, toYyyyMmDd: string): boolean {
+  const fromParts = fromYyyyMmDd.split('-').map(Number);
+  const toParts = toYyyyMmDd.split('-').map(Number);
+
+  if (fromParts.length !== 3 || toParts.length !== 3) return true;
+
+  const [fromYear, fromMonth, fromDay] = fromParts;
+  const [toYear, toMonth, toDay] = toParts;
+  if (!fromYear || !fromMonth || !fromDay || !toYear || !toMonth || !toDay) return true;
+
+  const fromDate = new Date(fromYear, fromMonth - 1, fromDay, 0, 0, 0, 0);
+  const toDate = new Date(toYear, toMonth - 1, toDay, 23, 59, 59, 999);
+  return date >= fromDate && date <= toDate;
+}
+
+function getEffectiveItemStatus(order: Order, item: OrderItem): ItemStatus {
+  if (order.status === 'received') return 'waiting';
+  if (order.status === 'ready') return 'ready';
+  if (order.status === 'preparing') return item.itemStatus ?? 'preparing';
+  return item.itemStatus ?? 'waiting';
+}
+
+function ItemStatusIcon({ status }: { status: ItemStatus }) {
+  if (status === 'ready') return <CheckCircle2 className="w-3.5 h-3.5 text-status-ready" />;
+  if (status === 'preparing') return <ChefHat className="w-3.5 h-3.5 text-status-preparing" />;
+  return <Clock className="w-3.5 h-3.5 text-muted-foreground" />;
 }
 
 export default function AdminPage() {
@@ -65,6 +111,10 @@ export default function AdminPage() {
   const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [ordersPerPage, setOrdersPerPage] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
+  const [recentHours, setRecentHours] = useState<(typeof RECENT_HOURS_OPTIONS)[number]>(3);
+  const todayDate = useMemo(() => toDateInputValue(new Date()), []);
+  const [olderDateFrom, setOlderDateFrom] = useState(todayDate);
+  const [olderDateTo, setOlderDateTo] = useState(todayDate);
   const [, setTimeTick] = useState(0);
 
   const stats = [
@@ -83,7 +133,15 @@ export default function AdminPage() {
 
   const filtered = orders
     .filter(o => filter === 'all' || o.status === filter)
-    .filter(o => (timeMode === 'recent' ? isRecentOrder(o) : !isRecentOrder(o)))
+    .filter(o => {
+      const referenceDate = getOrderReferenceDate(o);
+
+      if (timeMode === 'recent') {
+        return isWithinLastHours(referenceDate, recentHours);
+      }
+
+      return isWithinDateRange(referenceDate, olderDateFrom, olderDateTo);
+    })
     .filter(o => {
       if (!search) return true;
       const s = search.toLowerCase();
@@ -96,7 +154,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [filter, search, ordersPerPage]);
+  }, [filter, search, ordersPerPage, timeMode, recentHours, olderDateFrom, olderDateTo]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -163,7 +221,7 @@ export default function AdminPage() {
             size="sm"
             onClick={() => setTimeMode('recent')}
           >
-            Ultimas 3h
+            Últimos pedidos
           </Button>
           <Button
             variant={timeMode === 'older' ? 'default' : 'outline'}
@@ -173,6 +231,42 @@ export default function AdminPage() {
             Pedidos anteriores
           </Button>
         </div>
+        {timeMode === 'recent' ? (
+          <div className="flex items-center gap-2">
+            <label htmlFor="recent-hours" className="text-sm text-muted-foreground">Janela</label>
+            <select
+              id="recent-hours"
+              value={recentHours}
+              onChange={e => setRecentHours(Number(e.target.value) as (typeof RECENT_HOURS_OPTIONS)[number])}
+              className="h-10 rounded-md border border-input bg-card px-3 text-sm"
+            >
+              {RECENT_HOURS_OPTIONS.map(option => (
+                <option key={option} value={option}>
+                  Últimas {option}h
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <label htmlFor="older-date-from" className="text-sm text-muted-foreground">De</label>
+            <Input
+              id="older-date-from"
+              type="date"
+              value={olderDateFrom}
+              onChange={e => setOlderDateFrom(e.target.value || todayDate)}
+              className="w-[160px] bg-card"
+            />
+            <label htmlFor="older-date-to" className="text-sm text-muted-foreground">Até</label>
+            <Input
+              id="older-date-to"
+              type="date"
+              value={olderDateTo}
+              onChange={e => setOlderDateTo(e.target.value || todayDate)}
+              className="w-[160px] bg-card"
+            />
+          </div>
+        )}
         <div className="flex items-center gap-2 ml-auto">
           <label htmlFor="orders-per-page" className="text-sm text-muted-foreground">Pedidos por página</label>
           <select
@@ -224,11 +318,15 @@ export default function AdminPage() {
 
                     <div className="mt-2">
                       <div className="flex flex-wrap gap-2">
-                        {order.items.map(it => (
-                          <Badge key={it.id} variant="secondary" className="text-xs">
-                            {it.quantity}x {it.name}
-                          </Badge>
-                        ))}
+                        {order.items.map(it => {
+                          const itemStatus = getEffectiveItemStatus(order, it);
+                          return (
+                            <Badge key={it.id} variant="secondary" className="text-xs inline-flex items-center gap-1.5">
+                              <ItemStatusIcon status={itemStatus} />
+                              {it.quantity}x {it.name}
+                            </Badge>
+                          );
+                        })}
                       </div>
                       {order.observations && <p className="text-xs text-muted-foreground mt-2">{order.observations}</p>}
                     </div>
@@ -325,18 +423,22 @@ export default function AdminPage() {
                         <td className="p-4">{getDisplayCustomerName(order.customerName)}</td>
                         <td className="p-4 hidden md:table-cell">
                           <div className="flex flex-col gap-1">
-                            {order.items.map(item => (
-                              <div key={item.id} className="flex flex-col gap-0.5">
-                                <Badge variant="secondary" className="text-xs w-fit">
-                                  {item.quantity}x {item.name}
-                                </Badge>
-                                {formatItemNote(item.notes) && (
-                                  <span className="text-[11px] text-muted-foreground pl-1">
-                                    Obs item: {formatItemNote(item.notes)}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
+                            {order.items.map(item => {
+                              const itemStatus = getEffectiveItemStatus(order, item);
+                              return (
+                                <div key={item.id} className="flex flex-col gap-0.5">
+                                  <Badge variant="secondary" className="text-xs w-fit inline-flex items-center gap-1.5">
+                                    <ItemStatusIcon status={itemStatus} />
+                                    {item.quantity}x {item.name}
+                                  </Badge>
+                                  {formatItemNote(item.notes) && (
+                                    <span className="text-[11px] text-muted-foreground pl-1">
+                                      Obs item: {formatItemNote(item.notes)}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </td>
                         <td className="p-4 hidden lg:table-cell text-sm text-muted-foreground max-w-[200px] truncate">

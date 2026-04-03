@@ -1,5 +1,6 @@
 export type OrderStatus = 'received' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
 export type ItemStatus = 'waiting' | 'preparing' | 'ready';
+export type ServiceMode = 'balcao' | 'mesa' | 'cartao' | 'delivery' | 'encomenda' | 'servico' | 'apartamento';
 
 export interface Sector {
   id: string;
@@ -20,7 +21,9 @@ export interface Order {
   id: string;
   number: number;
   customerName: string;
+  serviceMode?: ServiceMode | null;
   cookId?: string | null;
+  attendant?: string | null;
   items: OrderItem[];
   observations: string;
   status: OrderStatus;

@@ -50,33 +50,35 @@ function Timer({ startTime, colorClass }: { startTime: Date; colorClass: string 
 /** Botão de toggle de status por item (visão de comanda completa e setores). */
 function ItemStatusToggle({
   item,
+  itemIndex,
   orderId,
   current,
   disabled,
   onToggle,
 }: {
   item: OrderItem;
+  itemIndex: number;
   orderId: string;
   current: ItemStatus;
   disabled: boolean;
-  onToggle: (orderId: string, itemId: string, next: ItemStatus) => void;
+  onToggle: (orderId: string, itemId: string, next: ItemStatus, itemIndex?: number) => void;
 }) {
   const next: ItemStatus = current === 'ready' ? 'waiting' : current === 'preparing' ? 'ready' : 'preparing';
 
   const cls = current === 'ready'
-    ? 'bg-status-ready/10 border-status-ready/50 text-status-ready hover:bg-status-ready/20'
+    ? 'bg-status-ready border-status-ready text-primary-foreground hover:brightness-95'
     : current === 'preparing'
-    ? 'bg-status-preparing/10 border-status-preparing/50 text-status-preparing hover:bg-status-preparing/20'
-    : 'bg-muted/60 border-border text-muted-foreground hover:bg-muted';
+    ? 'bg-status-preparing border-status-preparing text-primary-foreground hover:brightness-95'
+    : 'bg-status-received border-status-received text-primary-foreground hover:brightness-95';
 
   return (
     <button
-      onClick={() => onToggle(orderId, item.id, next)}
+      onClick={() => onToggle(orderId, item.id, next, itemIndex)}
       disabled={disabled}
       title={disabled ? 'Status liberado apenas no setor do item e com pedido em preparo' : 'Alternar status do item'}
-      className={`mt-1 w-8 h-8 inline-flex items-center justify-center rounded border transition-colors ${cls} ${disabled ? 'opacity-40 cursor-not-allowed hover:bg-inherit' : ''}`}
+      className={`mt-1 w-9 h-9 inline-flex items-center justify-center rounded border transition-colors ${cls} ${disabled ? 'opacity-60 cursor-not-allowed hover:brightness-100' : ''}`}
     >
-      {current === 'ready' ? <CheckCircle2 className="w-3.5 h-3.5" /> : current === 'preparing' ? <ChefHat className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+      {current === 'ready' ? <CheckCircle2 className="w-4 h-4" /> : current === 'preparing' ? <ChefHat className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
     </button>
   );
 }
@@ -100,6 +102,19 @@ export default function KitchenPage() {
       isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS)
     ))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+  const kitchenOrders = orders
+    .filter(o => (
+      (o.status === 'received' || o.status === 'preparing' || o.status === 'ready')
+      && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS)
+    ));
+
+  const totalKitchenCount = kitchenOrders.length;
+  const preparingCount = kitchenOrders.filter(o => o.status === 'preparing').length;
+  const readyCount = kitchenOrders.filter(o => o.status === 'ready').length;
+  const lateCount = kitchenOrders.filter(o => (
+    o.status !== 'ready' && getElapsedMinutes(o.createdAt) > tempoCritico
+  )).length;
 
   // Pedidos filtrados para a aba de setor ativo (exclui pedidos sem itens daquele setor e pedidos com todos os itens do setor já prontos)
   const ordersForTab = activeTab === 'all'
@@ -130,16 +145,20 @@ export default function KitchenPage() {
   }
 
   /** Filtra itens de um pedido conforme a aba ativa. */
-  function visibleItems(order: Order): OrderItem[] {
-    if (activeTab === 'all') return order.items;
-    return order.items.filter(it => it.sectorId === activeTab);
+  function visibleItems(order: Order): Array<{ item: OrderItem; itemIndex: number }> {
+    if (activeTab === 'all') {
+      return order.items.map((item, itemIndex) => ({ item, itemIndex }));
+    }
+
+    return order.items
+      .map((item, itemIndex) => ({ item, itemIndex }))
+      .filter(({ item }) => item.sectorId === activeTab);
   }
 
-  // O ícone do item obedece ao status principal do pedido.
+  // Mantem consistencia visual: pedido recebido nao pode mostrar item em preparo.
   function getEffectiveItemStatus(order: Order, item: OrderItem): ItemStatus {
     if (order.status === 'received') return 'waiting';
     if (order.status === 'ready') return 'ready';
-    if (order.status === 'preparing') return item.itemStatus ?? 'preparing';
     return item.itemStatus ?? 'waiting';
   }
 
@@ -153,22 +172,48 @@ export default function KitchenPage() {
    * A finalização do pedido completo continua restrita à aba "Comanda Completa".
    */
   function markVisibleItemsReady(order: Order) {
-    const itemsToUpdate = visibleItems(order).filter(item => (item.itemStatus ?? 'waiting') !== 'ready');
-    itemsToUpdate.forEach(item => updateItemStatus(order.id, item.id, 'ready'));
+    const itemsToUpdate = visibleItems(order).filter(({ item }) => (item.itemStatus ?? 'waiting') !== 'ready');
+    itemsToUpdate.forEach(({ item, itemIndex }) => updateItemStatus(order.id, item.id, 'ready', itemIndex));
+  }
+
+  /**
+   * Em abas de setor, marca os itens visíveis daquele setor como 'preparing'.
+   * Chamado quando clica "INICIAR PREPARO" por setor.
+   */
+  function markVisibleItemsPreparing(order: Order) {
+    const itemsToUpdate = visibleItems(order).filter(({ item }) => (item.itemStatus ?? 'waiting') !== 'preparing');
+    itemsToUpdate.forEach(({ item, itemIndex }) => updateItemStatus(order.id, item.id, 'preparing', itemIndex));
   }
 
   return (
     <div className="min-h-screen p-4 md:p-6 flex flex-col gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
-            🍳 Cozinha
-          </h1>
-          <p className="text-muted-foreground text-sm">{activeOrders.length} pedidos ativos</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-xl md:text-2xl font-bold flex items-center gap-2">
+              🍳 Cozinha
+            </h1>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button type="button" disabled className="px-2.5 py-1 rounded-md border border-border bg-card text-foreground text-xs font-semibold">
+                Total: {totalKitchenCount}
+              </button>
+              <button type="button" disabled className="px-2.5 py-1 rounded-md border border-status-preparing/40 bg-status-preparing/10 text-foreground text-xs font-semibold">
+                Em preparo: {preparingCount}
+              </button>
+              <button type="button" disabled className="px-2.5 py-1 rounded-md border border-status-ready/40 bg-status-ready/10 text-foreground text-xs font-semibold">
+                Prontos: {readyCount}
+              </button>
+              <button type="button" disabled className="px-2.5 py-1 rounded-md border border-timer-danger/40 bg-timer-danger/10 text-foreground text-xs font-semibold">
+                Atraso: {lateCount}
+              </button>
+            </div>
+          </div>
         </div>
         <div className="text-right text-muted-foreground text-sm">
           {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
+          {' • '}
+          {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>
 
@@ -221,6 +266,8 @@ export default function KitchenPage() {
             const items = visibleItems(order);
             const isCancelled = order.status === 'cancelled';
             const isCritical = !isCancelled && minutes > tempoCritico;
+            const sectorItemStatuses = items.map(({ item }) => getEffectiveItemStatus(order, item));
+            const allSectorWaiting = sectorItemStatuses.length > 0 && sectorItemStatuses.every(status => status === 'waiting');
 
             return (
               <motion.div
@@ -235,11 +282,11 @@ export default function KitchenPage() {
                     : isCritical && animationsEnabled
                     ? 'animate-pulse-danger border-timer-danger'
                     : `${getTimerBorder(minutes)} ${getTimerBg(minutes)}`
-                } p-5 flex flex-col gap-4`}
+                } p-4 flex flex-col gap-3`}
               >
                 {/* Header */}
                 <div className="flex items-center justify-between">
-                  <span className="text-4xl font-black">{order.number}</span>
+                  <span className="text-3xl font-black">{order.number}</span>
                   <Timer startTime={order.createdAt} colorClass={getTimerColor(minutes)} />
                 </div>
 
@@ -250,10 +297,10 @@ export default function KitchenPage() {
                   : order.status === 'preparing' ? 'bg-status-preparing text-primary-foreground'
                   : 'bg-status-ready text-primary-foreground'
                 }`}>
-                  {isCancelled ? <AlertTriangle className="w-3 h-3" />
-                    : order.status === 'received' ? <Clock className="w-3 h-3" />
-                    : order.status === 'preparing' ? <AlertTriangle className="w-3 h-3" />
-                    : <CheckCircle2 className="w-3 h-3" />}
+                  {isCancelled ? <AlertTriangle className="w-3.5 h-3.5" />
+                    : order.status === 'received' ? <Clock className="w-3.5 h-3.5" />
+                    : order.status === 'preparing' ? <ChefHat className="w-3.5 h-3.5" />
+                    : <CheckCircle2 className="w-3.5 h-3.5" />}
                   {STATUS_LABELS[order.status]}
                 </div>
 
@@ -261,10 +308,14 @@ export default function KitchenPage() {
                   <p className="text-sm text-muted-foreground -mt-2">Cozinheiro: {order.cookId}</p>
                 )}
 
+                {order.serviceMode === 'mesa' && order.attendant && (
+                  <p className="text-sm text-blue-600 dark:text-blue-400 font-semibold -mt-2">Atendente: {order.attendant}</p>
+                )}
+
                 {/* Itens (filtrados pelo setor ativo) */}
                 <div className="space-y-3 flex-1">
-                  {items.map(item => (
-                    <div key={item.id} className="space-y-1">
+                  {items.map(({ item, itemIndex }) => (
+                    <div key={`${item.id}-${itemIndex}`} className="space-y-1">
                       {(() => {
                         const itemStatus = getEffectiveItemStatus(order, item);
                         const canChangeItemStatus = order.status === 'preparing' && activeTab !== 'all' && item.sectorId === activeTab;
@@ -280,6 +331,7 @@ export default function KitchenPage() {
                             {!isCancelled && (
                               <ItemStatusToggle
                                 item={item}
+                                itemIndex={itemIndex}
                                 orderId={order.id}
                                 current={itemStatus}
                                 disabled={!canChangeItemStatus}
@@ -317,6 +369,16 @@ export default function KitchenPage() {
                       OK — Pedido Cancelado
                     </button>
                   </div>
+                ) : activeTab !== 'all' && allSectorWaiting ? (
+                  <button
+                    onClick={() => {
+                      // Em setor, inicia preparo apenas dos itens daquele setor.
+                      markVisibleItemsPreparing(order);
+                    }}
+                    className="w-full py-3 rounded-lg bg-status-preparing text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98]"
+                  >
+                    INICIAR PREPARO
+                  </button>
                 ) : order.status === 'received' ? (
                   <button
                     onClick={() => updateStatus(order.id, 'preparing', username || undefined)}
@@ -324,7 +386,8 @@ export default function KitchenPage() {
                   >
                     INICIAR PREPARO
                   </button>
-                ) : activeTab !== 'all' ? (
+                ) : order.status === 'preparing' && activeTab !== 'all' ? (
+                  // Em visualização de setor + preparando: marca items visíveis como prontos
                   <button
                     onClick={() => markVisibleItemsReady(order)}
                     className="w-full py-3 rounded-lg bg-status-ready text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98] flex items-center justify-center gap-2"
@@ -332,7 +395,8 @@ export default function KitchenPage() {
                     <CheckCircle2 className="w-5 h-5" />
                     ITEM PRONTO
                   </button>
-                ) : (
+                ) : order.status === 'preparing' && activeTab === 'all' ? (
+                  // Em comanda completa + preparando: marca o pedido inteiro como pronto
                   <button
                     onClick={() => updateStatus(order.id, 'ready')}
                     className="w-full py-3 rounded-lg bg-status-ready text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98] flex items-center justify-center gap-2"
@@ -340,7 +404,7 @@ export default function KitchenPage() {
                     <CheckCircle2 className="w-5 h-5" />
                     MARCAR COMO PRONTO
                   </button>
-                )}
+                ) : null}
               </motion.div>
             );
           })}

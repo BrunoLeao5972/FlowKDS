@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { Order, OrderStatus, Sector, ItemStatus } from '@/types/order';
+import { Order, OrderStatus, Sector, ItemStatus, ServiceMode } from '@/types/order';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';
 import { getDisplayCustomerName, getPrintableCustomerName } from '@/lib/customerName';
@@ -10,7 +10,7 @@ interface OrderContextType {
   sectors: Sector[];
   addOrder: (order: Omit<Order, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateStatus: (id: string, status: OrderStatus, cookId?: string) => void;
-  updateItemStatus: (orderId: string, itemId: string, itemStatus: ItemStatus) => void;
+  updateItemStatus: (orderId: string, itemId: string, itemStatus: ItemStatus, itemIndex?: number) => void;
   cancelOrder: (id: string) => void;
   acknowledgeCancelledOrder: (id: string) => void;
   getOrdersByStatus: (status: OrderStatus) => Order[];
@@ -22,6 +22,34 @@ interface OrderContextType {
 const OrderContext = createContext<OrderContextType | null>(null);
 
 const INITIAL_ORDERS: Order[] = [];
+const ALL_SERVICE_MODES: ServiceMode[] = ['balcao', 'mesa', 'cartao', 'delivery', 'encomenda', 'servico', 'apartamento'];
+
+const normalizeServiceMode = (value: unknown): ServiceMode | null => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const aliases: Record<string, ServiceMode> = {
+    balcao: 'balcao',
+    balcon: 'balcao',
+    mesa: 'mesa',
+    cartao: 'cartao',
+    delivery: 'delivery',
+    entrega: 'delivery',
+    encomenda: 'encomenda',
+    servico: 'servico',
+    apartamento: 'apartamento',
+  };
+
+  return aliases[normalized] || null;
+};
+
+const shouldPrintTicket = (order: Pick<Order, 'serviceMode'>): boolean => {
+  return normalizeServiceMode(order.serviceMode) !== 'mesa';
+};
 
 export function OrderProvider({ children }: { children: React.ReactNode }) {
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
@@ -36,6 +64,21 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     : window.location.origin);
 
   const authHeaders = useMemo(() => (token ? { 'x-kds-token': token } : {}), [token]);
+  const normalizedEnabledServiceModes = useMemo(
+    () => (settings.enabledServiceModes || []).map(mode => normalizeServiceMode(mode)).filter((mode): mode is ServiceMode => !!mode),
+    [settings.enabledServiceModes]
+  );
+
+  const isOrderAllowedByServiceMode = useCallback((order: Order) => {
+    const orderServiceMode = normalizeServiceMode(order.serviceMode);
+    if (!orderServiceMode) return true;
+
+    const effectiveModes = normalizedEnabledServiceModes.length
+      ? normalizedEnabledServiceModes
+      : ALL_SERVICE_MODES;
+
+    return effectiveModes.includes(orderServiceMode);
+  }, [normalizedEnabledServiceModes]);
 
   const resolvePrinterMode = useCallback((rawPrinterName: string) => {
     const input = String(rawPrinterName || '').trim();
@@ -117,6 +160,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [settings.printSize, settings.restaurantTradeName]);
 
   const printOrderTicket = useCallback(async (createdOrder: Order) => {
+    if (!shouldPrintTicket(createdOrder)) return;
+
     const resolved = resolvePrinterMode(settings.printerName || '');
     const mode = resolved.mode;
     if (mode === 'HTML') {
@@ -171,6 +216,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printScale, settings.printSize, settings.restaurantTradeName]);
 
   const reprintOrderTicket = useCallback(async (order: Order) => {
+    if (!shouldPrintTicket(order)) return;
+
     const resolved = resolvePrinterMode(settings.printerName || '');
     try {
       await fetch(`${API_BASE}/print/ticket`, {
@@ -208,6 +255,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       const normalized = {
         ...created,
         customerName: getDisplayCustomerName(created.customerName),
+        serviceMode: normalizeServiceMode((created as any).serviceMode ?? (created as any).modality ?? (created as any).tipoAtendimento),
         cookId: created.cookId || null,
         createdAt: new Date(created.createdAt),
         updatedAt: new Date(created.updatedAt),
@@ -348,19 +396,31 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [orders]);
 
   // Atualiza o status individual de um item (otimista + sincroniza com servidor).
-  const updateItemStatus = useCallback((orderId: string, itemId: string, itemStatus: ItemStatus) => {
+  const updateItemStatus = useCallback((orderId: string, itemId: string, itemStatus: ItemStatus, itemIndex?: number) => {
     setOrders(prev => prev.map(o => {
       if (o.id !== orderId) return o;
+      let hasUpdatedById = false;
       return {
         ...o,
-        items: o.items.map(it => it.id === itemId ? { ...it, itemStatus } : it),
+        items: o.items.map((it, idx) => {
+          if (typeof itemIndex === 'number') {
+            return idx === itemIndex ? { ...it, itemStatus } : it;
+          }
+
+          if (!hasUpdatedById && it.id === itemId) {
+            hasUpdatedById = true;
+            return { ...it, itemStatus };
+          }
+
+          return it;
+        }),
       };
     }));
 
     fetch(`${API_BASE}/orders/${orderId}/items/${itemId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ itemStatus }),
+      body: JSON.stringify({ itemStatus, ...(typeof itemIndex === 'number' ? { itemIndex } : {}) }),
     }).catch(err => console.error('updateItemStatus failed', err));
   }, [API_BASE, authHeaders]);
 
@@ -384,6 +444,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           const normalized = data.map(d => ({
             ...d,
             customerName: getDisplayCustomerName(d.customerName),
+            serviceMode: normalizeServiceMode((d as any).serviceMode ?? (d as any).modality ?? (d as any).tipoAtendimento),
             cookId: d.cookId || null,
             createdAt: new Date(d.createdAt),
             updatedAt: new Date(d.updatedAt),
@@ -396,7 +457,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             cancelledAt: d.cancelledAt ? new Date(d.cancelledAt) : undefined,
             cancelAcknowledgedAt: d.cancelAcknowledgedAt ? new Date(d.cancelAcknowledgedAt) : undefined,
           } as Order));
-          setOrders(normalized);
+          setOrders(normalized.filter(order => isOrderAllowedByServiceMode(order)));
         }
       } catch (err) {
         console.warn('Could not load orders from API', err);
@@ -424,6 +485,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         const normalized = {
           ...o,
           customerName: getDisplayCustomerName(o.customerName),
+          serviceMode: normalizeServiceMode((o as any).serviceMode ?? (o as any).modality ?? (o as any).tipoAtendimento),
           cookId: o.cookId || null,
           createdAt: new Date(o.createdAt),
           updatedAt: new Date(o.updatedAt),
@@ -436,6 +498,9 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : undefined,
           cancelAcknowledgedAt: o.cancelAcknowledgedAt ? new Date(o.cancelAcknowledgedAt) : undefined,
         } as Order;
+        if (!isOrderAllowedByServiceMode(normalized)) {
+          return;
+        }
         setOrders(prev => {
           // Evita pedidos duplicados no estado local.
           if (prev.find(p => p.id === normalized.id)) return prev;
@@ -454,6 +519,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         const normalized = {
           ...o,
           customerName: getDisplayCustomerName(o.customerName),
+          serviceMode: normalizeServiceMode((o as any).serviceMode ?? (o as any).modality ?? (o as any).tipoAtendimento),
           cookId: o.cookId || null,
           createdAt: new Date(o.createdAt),
           updatedAt: new Date(o.updatedAt),
@@ -466,21 +532,32 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           cancelledAt: o.cancelledAt ? new Date(o.cancelledAt) : undefined,
           cancelAcknowledgedAt: o.cancelAcknowledgedAt ? new Date(o.cancelAcknowledgedAt) : undefined,
         } as Order;
-        setOrders(prev => prev.map(p => {
-          if (p.id === normalized.id) {
-            // Toca som quando o pedido entra em "ready".
-            try {
-              if (normalized.status === 'ready' && p.status !== 'ready') {
-                if (settings?.readyOrderSoundEnabled && settings.readyOrderSound) {
-                  const a = new Audio(settings.readyOrderSound);
-                  a.play().catch(() => {});
-                }
-              }
-            } catch (e) {}
-            return normalized;
+        setOrders(prev => {
+          const alreadyExists = prev.some(p => p.id === normalized.id);
+          if (!isOrderAllowedByServiceMode(normalized)) {
+            return prev.filter(p => p.id !== normalized.id);
           }
-          return p;
-        }));
+
+          if (!alreadyExists) {
+            return [...prev, normalized].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+          }
+
+          return prev.map(p => {
+            if (p.id === normalized.id) {
+              // Toca som quando o pedido entra em "ready".
+              try {
+                if (normalized.status === 'ready' && p.status !== 'ready') {
+                  if (settings?.readyOrderSoundEnabled && settings.readyOrderSound) {
+                    const a = new Audio(settings.readyOrderSound);
+                    a.play().catch(() => {});
+                  }
+                }
+              } catch (e) {}
+              return normalized;
+            }
+            return p;
+          });
+        });
       });
 
       socket.on('orders:deleted', ({ id }: { id: string }) => {
@@ -493,7 +570,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     return () => {
       if (socket) socket.disconnect();
     };
-  }, [API_BASE, authHeaders, isAuthenticated, logout, settings, token]);
+  }, [API_BASE, authHeaders, isAuthenticated, isOrderAllowedByServiceMode, logout, settings, token]);
 
   return (
     <OrderContext.Provider value={{ orders, sectors, addOrder, updateStatus, updateItemStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime, printOrderTicket, reprintOrderTicket }}>

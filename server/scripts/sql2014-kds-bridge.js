@@ -177,6 +177,61 @@ function parseItemFromFlatRow(row) {
   };
 }
 
+function parseAttendantFromRow(row) {
+  const raw = String(
+    row.attendant
+    ?? row.atendente
+    ?? row.garcom
+    ?? row.waiter
+    ?? row.servidor
+    ?? ''
+  ).trim();
+  return raw || null;
+}
+
+function parseServiceModeFromRow(row) {
+  const rawValue = row.servicemode
+    ?? row.modalidade
+    ?? row.modality
+    ?? row.tipoatendimento
+    ?? row.atendimentotipo
+    ?? row.atendimento;
+
+  const raw = String(rawValue || '').trim().toLowerCase();
+  if (!raw) return null;
+
+  const numericModeMap = {
+    '1': 'balcao',
+    '2': 'mesa',
+    '3': 'cartao',
+    '4': 'delivery',
+    '5': 'encomenda',
+    '6': 'servico',
+    '7': 'apartamento',
+  };
+
+  if (numericModeMap[raw]) {
+    return numericModeMap[raw];
+  }
+
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const aliasMap = {
+    balcao: 'balcao',
+    mesa: 'mesa',
+    cartao: 'cartao',
+    delivery: 'delivery',
+    entrega: 'delivery',
+    encomenda: 'encomenda',
+    servico: 'servico',
+    apartamento: 'apartamento',
+  };
+
+  return aliasMap[normalized] || null;
+}
+
 function groupRowsToOrders(rows) {
   const grouped = new Map();
 
@@ -193,6 +248,8 @@ function groupRowsToOrders(rows) {
         externalId,
         number: row.number,
         customerName: row.customername,
+        serviceMode: parseServiceModeFromRow(row),
+        attendant: parseAttendantFromRow(row),
         observations: row.observations,
         status: row.status,
         updatedAt,
@@ -204,6 +261,12 @@ function groupRowsToOrders(rows) {
     }
 
     const current = grouped.get(externalId);
+    if (!current.serviceMode) {
+      current.serviceMode = parseServiceModeFromRow(row);
+    }
+    if (!current.attendant) {
+      current.attendant = parseAttendantFromRow(row);
+    }
     if (updatedAt > current.updatedAt) {
       current.updatedAt = updatedAt;
     }
@@ -234,15 +297,30 @@ function groupRowsToOrders(rows) {
     }
   }
 
-  return Array.from(grouped.values()).map(order => ({
-    ...order,
-    status: order.isOrderCancelled
-      ? 'cancelled'
-      : (order.hasActiveItems ? 'received' : (order.hasCancelledItems ? 'cancelled' : normalizeStatus(order.status))),
-    items: order.items.length
-      ? order.items
-      : [{ name: 'Pedido sem itens detalhados', quantity: 1, notes: '' }],
-  }));
+  return Array.from(grouped.values()).map(order => {
+    // Determina o status final do pedido:
+    // 1. Se foi marcado como cancelado (todos os itens), é 'cancelled'
+    // 2. Se a SQL não trouxe um status explícito e há itens ativos, padrão 'received'
+    // 3. Caso contrário, normaliza o status vindo da SQL
+    let finalStatus = 'received';
+    if (order.isOrderCancelled) {
+      finalStatus = 'cancelled';
+    } else if (!order.hasActiveItems && order.hasCancelledItems) {
+      finalStatus = 'cancelled';
+    } else {
+      const normalized = normalizeStatus(order.status);
+      // Se a SQL trouxe um status explícito, respeita (exceto forçar 'received' para novos)
+      finalStatus = normalized || 'received';
+    }
+
+    return {
+      ...order,
+      status: finalStatus,
+      items: order.items.length
+        ? order.items
+        : [{ name: 'Pedido sem itens detalhados', quantity: 1, notes: '' }],
+    };
+  });
 }
 
 async function loadState() {
@@ -372,6 +450,8 @@ async function createOrderInKds(row, options = {}) {
   const payload = {
     number: Number(row.number),
     customerName: String(row.customername || ''),
+    serviceMode: row.serviceMode || null,
+    attendant: row.attendant || null,
     observations: String(row.observations || ''),
     items: parseItems(row.itemsjson),
     suppressAutoPrint: options.suppressAutoPrint === true,
@@ -396,6 +476,22 @@ async function updateOrderStatusInKds(kdsOrderId, status) {
     method: 'PATCH',
     body: JSON.stringify({ status }),
   });
+}
+
+async function safeUpdateOrderStatusInKds(kdsOrderId, status, context) {
+  try {
+    await updateOrderStatusInKds(kdsOrderId, status);
+    return true;
+  } catch (error) {
+    const message = String(error?.message || error || '');
+    if (message.includes('invalid_status_transition')) {
+      console.warn(
+        `[sql2014-bridge] transicao ignorada para evitar pulo de etapa: externalId=${context.externalId} kdsId=${kdsOrderId} target=${status}`
+      );
+      return false;
+    }
+    throw error;
+  }
 }
 
 function parseUpdatedAt(value) {
@@ -443,6 +539,8 @@ async function syncCycle(pool, state, queryText, options = {}) {
       const createdOrder = await createOrderInKds({
         number: row.number,
         customername: row.customerName,
+        serviceMode: row.serviceMode,
+        attendant: row.attendant,
         observations: row.observations,
         itemsjson: row.items,
         externalid: externalId,
@@ -453,13 +551,27 @@ async function syncCycle(pool, state, queryText, options = {}) {
       state.idMap[externalId] = kdsId;
       await saveState(state); // salva imediatamente para evitar duplicata em caso de crash
       created += 1;
-    }
-
-    const lastKnownStatus = state.lastStatusByExternalId[externalId] || 'received';
-    if (mappedStatus !== lastKnownStatus) {
-      await updateOrderStatusInKds(kdsId, mappedStatus);
-      state.lastStatusByExternalId[externalId] = mappedStatus;
-      updated += 1;
+    } else {
+      // Pedido já existe no KDS: preservar status se está em 'preparing' ou 'ready'
+      // Só sincronizar status novamente se voltou para 'received' na SQL (contra-sincronização)
+      const lastKnownStatus = state.lastStatusByExternalId[externalId] || 'received';
+      
+      // Apenas atualizar se a SQL força voltar para 'received' (caso contrário, respeita KDS)
+      if (mappedStatus === 'received' && lastKnownStatus !== 'received') {
+        // SQL voltou para 'received': pode significar cancelamento, então sincroniza
+        const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
+        if (didUpdate) {
+          state.lastStatusByExternalId[externalId] = mappedStatus;
+          updated += 1;
+        }
+      } else if (mappedStatus !== lastKnownStatus && mappedStatus !== 'preparing' && mappedStatus !== 'ready') {
+        // Apenas sincroniza status de 'cancelled' ou outros status administrativos
+        const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
+        if (didUpdate) {
+          state.lastStatusByExternalId[externalId] = mappedStatus;
+          updated += 1;
+        }
+      }
     }
 
     if (!state.lastStatusByExternalId[externalId]) {

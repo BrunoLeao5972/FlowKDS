@@ -55,6 +55,8 @@ export function AppNav() {
     setPrinterName,
     setPrintSize,
     setPrintScale,
+    enabledServiceModes,
+    setEnabledServiceModes,
   } = useSettings();
 
   const getApiBase = () => {
@@ -166,7 +168,8 @@ export function AppNav() {
             readyEnabled,
             printerName,
             printSize,
-            printScale
+            printScale,
+            serviceModes
           ) => {
             setTempoMedio(medio);
             setTempoCritico(critico);
@@ -201,11 +204,13 @@ export function AppNav() {
             setPrinterName(printerName);
             setPrintSize(printSize);
             setPrintScale(115);
+            setEnabledServiceModes(serviceModes);
             // if user enabled daily-reset or custom-start, update last reset date to today so numbering starts immediately
             if (orderMode === 'daily-reset' || orderMode === 'custom-start') touchResetDate();
             setShowConfig(false);
           }}
           ThemeToggle={<ThemeToggle />}
+          enabledServiceModes={enabledServiceModes}
         />
       )}
     </>

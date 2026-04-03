@@ -38,12 +38,12 @@
     /* KDS Status Colors */
     --status-received: 210 80% 55%;
     --status-preparing: 35 95% 55%;
-    --status-ready: 145 70% 45%;
+    --status-ready: 145 85% 32%;
     --status-delivered: 220 15% 35%;
     --status-cancelled: 0 72% 51%;
 
     /* Timer Colors */
-    --timer-ok: 145 70% 45%;
+    --timer-ok: 145 85% 32%;
     --timer-warning: 45 95% 55%;
     --timer-danger: 0 72% 55%;
 
@@ -93,12 +93,12 @@
     /* KDS Status Colors */
     --status-received: 210 80% 55%;
     --status-preparing: 35 95% 55%;
-    --status-ready: 145 70% 45%;
+    --status-ready: 145 85% 32%;
     --status-delivered: 220 15% 35%;
     --status-cancelled: 0 72% 51%;
 
     /* Timer Colors */
-    --timer-ok: 145 70% 45%;
+    --timer-ok: 145 85% 32%;
     --timer-warning: 45 95% 55%;
     --timer-danger: 0 72% 55%;
 
@@ -139,7 +139,7 @@
 
 /* Pulse animation for ready orders */
 @keyframes pulse-ready {
-  0%, 100% { box-shadow: 0 0 0 0 hsla(var(--status-ready), 0.4); }
+  0%, 100% { box-shadow: 0 0 0 0 hsla(var(--status-ready), 0.6); }
   50% { box-shadow: 0 0 0 12px hsla(var(--status-ready), 0); }
 }
 
