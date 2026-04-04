@@ -54,6 +54,7 @@ function startProcess(name, command, args, cwd = SERVER_DIR) {
   child.on('exit', (code) => {
     log(`⚠️ ${name} encerrado com código ${code}`);
     if (name.includes('Bridge')) {
+      // Bridge SQL e critico para ingestao; tenta auto-recuperacao.
       log('Tentando reiniciar em 5 segundos...');
       setTimeout(() => startProcess(name, command, args, cwd), 5000);
     }
@@ -63,6 +64,7 @@ function startProcess(name, command, args, cwd = SERVER_DIR) {
 }
 
 function shutdown() {
+  // Encerramento gracioso para evitar processos orfaos no Windows.
   log('Encerrando processos filhos...');
   children.forEach((child) => {
     if (!child.killed) child.kill('SIGINT');
@@ -85,6 +87,7 @@ function main() {
     [path.join(SERVER_DIR, 'index.js')]
   );
 
+  // Aguarda o server subir antes de iniciar a ponte SQL para reduzir erro de bootstrap.
   setTimeout(() => {
     startProcess(
       'KDS Bridge (SQL2014 Sync)',

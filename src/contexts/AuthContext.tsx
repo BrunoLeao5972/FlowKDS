@@ -17,6 +17,7 @@ const STORAGE_USER = 'kds_auth_user';
 const STORAGE_PERMISSIONS = 'kds_auth_permissions';
 const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings'];
 
+// Mantém o mesmo cálculo de base usado pelos outros contextos.
 function getApiBase() {
   if (import.meta.env.VITE_API_BASE) return import.meta.env.VITE_API_BASE;
   if (window.location.port === '5173') {
@@ -26,6 +27,7 @@ function getApiBase() {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Inicializa sessão diretamente do localStorage para evitar "flash" de logout.
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(STORAGE_TOKEN));
   const [username, setUsername] = useState<string | null>(() => localStorage.getItem(STORAGE_USER));
   const [permissions, setPermissions] = useState<string[]>(() => {
@@ -52,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const nextToken = data.token || 'auth-disabled';
     const nextPermissions: string[] = data.permissions || ALL_PERMISSIONS;
 
+    // Persiste sessão para manter login após recarregar a aplicação.
     localStorage.setItem(STORAGE_TOKEN, nextToken);
     localStorage.setItem(STORAGE_USER, user);
     localStorage.setItem(STORAGE_PERMISSIONS, JSON.stringify(nextPermissions));
@@ -62,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
+    // Limpeza centralizada para evitar estado parcial de sessão.
     localStorage.removeItem(STORAGE_TOKEN);
     localStorage.removeItem(STORAGE_USER);
     localStorage.removeItem(STORAGE_PERMISSIONS);

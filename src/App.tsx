@@ -46,6 +46,10 @@ function AppContent() {
 }
 
 const App = () => (
+  // Ordem dos providers:
+  // 1) Auth define sessão/token
+  // 2) Settings usa preferências locais/remotas
+  // 3) Order consome auth+settings para API, socket e impressão
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <BrowserRouter>

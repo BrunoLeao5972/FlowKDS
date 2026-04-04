@@ -88,6 +88,37 @@ Além do fluxo base de pedidos, o sistema agora inclui autenticação, gerenciam
 - `server/models/AuthConfig.js`: suporte à configuração de autenticação principal.
 - `server/scripts/test-db-connection.js`: teste rápido de conectividade com o banco.
 
+## Documentação de Código e Manutenção
+
+Esta base agora possui comentários técnicos nos pontos críticos de operação para facilitar onboarding, suporte e evolução segura.
+
+Arquivos com foco de documentação técnica:
+
+- `src/contexts/OrderContext.tsx`: normalização de payload, filtros por modo de atendimento, estratégia de atualização otimista, sincronização por Socket.IO e fluxo de impressão.
+- `src/contexts/AuthContext.tsx`: ciclo de vida da sessão (persistência, restauração e limpeza), permissões e login.
+- `src/contexts/SettingsContext.tsx`: persistência local, carga remota de dados do restaurante e regras de numeração de pedidos.
+- `src/App.tsx`: ordem dos providers e dependências entre contextos.
+- `server/index.js`: autenticação legada/SaaS, validação de token, regras de transição de status e middleware de socket.
+- `src/pages/AdminPage.tsx`: pipeline de filtros, paginação e atualização periódica da visão administrativa.
+- `src/pages/PublicDisplayPage.tsx`: separação de filas (preparo/pronto) e atualização contínua para painel público.
+- `server/services/pedidoPrinter.js`: estratégia de impressão (GDI + fallback RAW), validação de impressora e geração de saída alternativa.
+- `server/saas/syncWorker.js`: aplicação idempotente de eventos, retry com backoff e emissão para salas por tenant.
+- `start-kds.js`: orquestração local de processos, logs e auto-restart do bridge SQL.
+
+Diretrizes adotadas para comentários:
+
+- Explicar decisões e regras de negócio, não o óbvio da sintaxe.
+- Destacar integrações que afetam comportamento (API, socket, impressão e localStorage).
+- Registrar compatibilidades legadas e fallbacks para operação offline ou com bloqueios do navegador.
+
+Checklist de manutenção recomendada:
+
+1. Validar build após mudanças em contexto/estado: `npm run build`.
+2. Validar backend e conexão de banco: `cd server && npm run test:db`.
+3. Revisar transições de status ao alterar fluxo de cozinha (`received`, `preparing`, `ready`, `delivered`, `cancelled`).
+4. Revisar compatibilidade de `serviceMode` quando integrar novas fontes de pedidos.
+5. Confirmar se comentários continuam aderentes ao comportamento real após refactors.
+
 ## Requisitos
 
 - Node.js 18 ou superior.

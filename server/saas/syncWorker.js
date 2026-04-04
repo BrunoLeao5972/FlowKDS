@@ -4,6 +4,7 @@ const SyncEvent = require('../models/SyncEvent');
 const MAX_RETRIES = 8;
 
 async function applySyncEvent(event, io) {
+  // Aplica evento de forma idempotente: updateOne com chaves tenantId+id.
   const now = Date.now();
   const payload = event.payload || {};
 
@@ -59,6 +60,7 @@ async function applySyncEvent(event, io) {
 
   const updatedOrder = await Order.findOne({ tenantId: event.tenantId, id: event.entityId }).lean();
   if (updatedOrder) {
+    // Evento unico para telas conectadas ao tenant receberem estado consolidado.
     io.to(`tenant:${event.tenantId}`).emit('orders:updated', updatedOrder);
   }
 }
@@ -78,6 +80,7 @@ async function processBatch(io) {
     try {
       await applySyncEvent(event, io);
     } catch (error) {
+      // Backoff exponencial limitado para evitar loop agressivo no banco.
       const retries = Number(event.retries || 0) + 1;
       const delayMs = Math.min(30000, Math.pow(2, retries) * 500);
       await SyncEvent.updateOne(
@@ -98,6 +101,7 @@ async function processBatch(io) {
 function startSyncWorker(io) {
   const intervalMs = Number(process.env.SAAS_SYNC_WORKER_INTERVAL_MS || 2000);
   const timer = setInterval(() => {
+    // Loop enxuto: apenas agenda processamento e isola erro por ciclo.
     processBatch(io).catch(err => {
       console.error('sync worker failure', err);
     });

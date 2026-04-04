@@ -15,14 +15,17 @@ export default function PublicDisplayPage() {
   const [, setTick] = useState(0);
 
   useEffect(() => {
+    // Atualiza relogio/listagem em tela publica sem depender de interacao do operador.
     const interval = setInterval(() => setTick(t => t + 1), 3000);
     return () => clearInterval(interval);
   }, []);
 
+  // Coluna da esquerda: fila ainda em preparo (ordem cronologica).
   const preparingOrders = orders
     .filter(o => o.status === 'preparing' && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
+  // Coluna da direita: pedidos prontos, priorizando os mais recentes no topo.
   const readyOrders = orders
     .filter(o => o.status === 'ready' && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => (b.readyAt?.getTime() || 0) - (a.readyAt?.getTime() || 0));

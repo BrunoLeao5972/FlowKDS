@@ -24,6 +24,8 @@ const OrderContext = createContext<OrderContextType | null>(null);
 const INITIAL_ORDERS: Order[] = [];
 const ALL_SERVICE_MODES: ServiceMode[] = ['balcao', 'mesa', 'cartao', 'delivery', 'encomenda', 'servico', 'apartamento'];
 
+// Normaliza aliases e variações de acentuação para garantir filtro consistente
+// entre payloads vindos de APIs diferentes (serviceMode/modality/tipoAtendimento).
 const normalizeServiceMode = (value: unknown): ServiceMode | null => {
   const raw = String(value || '').trim().toLowerCase();
   if (!raw) return null;
@@ -47,6 +49,7 @@ const normalizeServiceMode = (value: unknown): ServiceMode | null => {
   return aliases[normalized] || null;
 };
 
+// Pedidos de mesa não geram ticket de balcão/cozinha.
 const shouldPrintTicket = (order: Pick<Order, 'serviceMode'>): boolean => {
   return normalizeServiceMode(order.serviceMode) !== 'mesa';
 };
@@ -58,7 +61,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   const { token, isAuthenticated, logout } = useAuth();
 
   // Em produção, frontend e API usam o mesmo domínio.
-  // No Vite local (5173), usa a API na porta 8081.
+  // Em desenvolvimento local, a API roda na 8081.
   const API_BASE = import.meta.env.VITE_API_BASE || (window.location.port === '5173'
     ? `${window.location.protocol}//${window.location.hostname}:8081`
     : window.location.origin);
@@ -69,6 +72,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     [settings.enabledServiceModes]
   );
 
+  // Se não houver filtro configurado, todos os modos ficam habilitados por padrão.
   const isOrderAllowedByServiceMode = useCallback((order: Order) => {
     const orderServiceMode = normalizeServiceMode(order.serviceMode);
     if (!orderServiceMode) return true;
@@ -80,6 +84,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     return effectiveModes.includes(orderServiceMode);
   }, [normalizedEnabledServiceModes]);
 
+  // Aceita prefixos no formato MODO:DESTINO para manter compatibilidade com setups
+  // antigos e novos (IMPRESSORA, HTML e FILE).
   const resolvePrinterMode = useCallback((rawPrinterName: string) => {
     const input = String(rawPrinterName || '').trim();
     const upper = input.toUpperCase();
@@ -118,6 +124,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Gera HTML local para modo de teste/diagnóstico sem depender do spooler.
   const buildTicketHtml = useCallback((order: Order, resolvedPrinterName: string) => {
     const createdAt = new Date(order.createdAt);
     const dateText = createdAt.toLocaleString('pt-BR');
@@ -173,7 +180,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Fallback: se o popup estiver bloqueado, delega para o backend abrir HTML.
+      // Fallback: se popup estiver bloqueado, delega a geração para o backend.
       try {
         await fetch(`${API_BASE}/print/ticket`, {
           method: 'POST',
@@ -252,6 +259,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       }
       if (!resp.ok) throw new Error('failed to create');
       const created: Order = await resp.json();
+      // Uniformiza payload recebido antes de qualquer uso local (UI/impressão).
       const normalized = {
         ...created,
         customerName: getDisplayCustomerName(created.customerName),
@@ -277,7 +285,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [API_BASE, authHeaders, logout, printOrderTicket]);
 
   const updateStatus = useCallback((id: string, status: OrderStatus, cookId?: string) => {
-    // Optimistic update: atualiza UI imediatamente
+    // Optimistic update: atualiza UI imediatamente para reduzir latência percebida.
     const now = new Date();
     const previousOrders = orders;
     
@@ -296,7 +304,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       };
     }));
 
-    // Sincroniza com servidor em background
+    // Sincroniza com servidor em background; em erro, reverte snapshot local.
     fetch(`${API_BASE}/orders/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
@@ -395,7 +403,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     return Math.round(averageMin);
   }, [orders]);
 
-  // Atualiza o status individual de um item (otimista + sincroniza com servidor).
+  // Atualiza status por item com estratégia otimista + confirmação no backend.
   const updateItemStatus = useCallback((orderId: string, itemId: string, itemStatus: ItemStatus, itemIndex?: number) => {
     setOrders(prev => prev.map(o => {
       if (o.id !== orderId) return o;
@@ -424,7 +432,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     }).catch(err => console.error('updateItemStatus failed', err));
   }, [API_BASE, authHeaders]);
 
-  // Carrega pedidos e mantém sincronização em tempo real via socket.
+  // Carrega snapshot inicial e mantém estado vivo pelos eventos do Socket.IO.
   useEffect(() => {
     if (!isAuthenticated) {
       setOrders([]);
@@ -466,7 +474,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
 
     fetchOrders(); // carga inicial
 
-    // Busca setores do servidor (não crítico, ignora falhas).
+    // Setores são auxiliares para as abas da cozinha; falha aqui não bloqueia operação.
     fetch(`${API_BASE}/sectors`, { headers: authHeaders })
       .then(r => r.ok ? r.json() : [])
       .then((data: Sector[]) => { if (Array.isArray(data)) setSectors(data); })
@@ -502,9 +510,9 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         setOrders(prev => {
-          // Evita pedidos duplicados no estado local.
+          // Evita duplicatas caso haja reconexão/socket replay.
           if (prev.find(p => p.id === normalized.id)) return prev;
-          // Toca som de novo pedido quando habilitado.
+          // Toca som de novo pedido quando habilitado nas preferências.
           try {
             if (settings?.newOrderSoundEnabled && settings.newOrderSound) {
               const a = new Audio(settings.newOrderSound);
@@ -544,7 +552,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
 
           return prev.map(p => {
             if (p.id === normalized.id) {
-              // Toca som quando o pedido entra em "ready".
+              // Som de pronto dispara apenas na transição para ready.
               try {
                 if (normalized.status === 'ready' && p.status !== 'ready') {
                   if (settings?.readyOrderSoundEnabled && settings.readyOrderSound) {

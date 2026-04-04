@@ -109,6 +109,7 @@ function montarPayloadRaw(conteudo, nomeImpressora) {
   const cutParcial = Buffer.from([0x1d, 0x56, 0x41, 0x10]);
 
   if (printer.includes('daruma')) {
+    // Daruma costuma aceitar corte parcial via ESC/POS.
     return Buffer.concat([escInit, escAlignLeft, textoBytes, feed, cutParcial]);
   }
 
@@ -146,7 +147,7 @@ async function listarImpressorasWindows() {
       const printers = parseList(stdout);
       if (printers.length > 0) return printers;
     } catch {
-      // tenta proximo metodo de descoberta
+      // Tenta o proximo metodo para ambientes com PowerShell/permicoes diferentes.
     }
   }
 
@@ -195,13 +196,13 @@ async function imprimirDireto(ticket, nomeImpressora) {
     };
   }
 
-  // GDI primeiro: funciona melhor com driver Windows (caso comum da Daruma)
+  // Estrategia principal: GDI (melhor compatibilidade com drivers Windows).
   const resultadoGdi = await imprimirDiretoGdi(ticket, nomeImpressora);
   if (resultadoGdi.ok) {
     return resultadoGdi;
   }
 
-  // Fallback RAW: para drivers com passthrough ESC/POS
+  // Fallback RAW: cobre drivers que aceitam passthrough ESC/POS.
   const resultadoRaw = await imprimirDiretoRaw(gerarConteudoPedidoTexto(ticket), nomeImpressora);
   if (resultadoRaw.ok) {
     return { ...resultadoRaw, mensagem: 'Impressao RAW enviada (fallback).' };

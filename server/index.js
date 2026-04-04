@@ -61,6 +61,7 @@ function parseBasicAuth(headerValue) {
   }
 }
 
+// Token assinado em formato simples payload.signature para cenário local/legado.
 function toBase64Url(value) {
   return Buffer.from(value, 'utf8').toString('base64url');
 }
@@ -83,6 +84,7 @@ function createAccessToken(username) {
   return `${payloadEncoded}.${signature}`;
 }
 
+// Validação com timingSafeEqual para reduzir risco de comparação insegura.
 function verifyAccessToken(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [payloadEncoded, signature] = token.split('.');
@@ -142,6 +144,7 @@ function parseBearerToken(headerValue) {
 }
 
 async function isAuthorizedHeader(headerValue, token) {
+  // Quando auth está desativada, mantém compatibilidade com ambientes de teste.
   if (!AUTH_ENABLED) return true;
   const activeAuth = await getActiveAuthConfig();
   if (!activeAuth) return false;
@@ -259,6 +262,7 @@ io.use(async (socket, next) => {
 const VALID_STATUSES = ['received', 'preparing', 'ready', 'delivered', 'cancelled'];
 const asyncHandler = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+// Matriz de transição de estados para impedir saltos inválidos de operação.
 const ALLOWED_STATUS_TRANSITIONS = {
   received: ['preparing', 'cancelled'],
   preparing: ['received', 'ready', 'cancelled'],
@@ -320,7 +324,7 @@ function normalizePermissions(rawPermissions) {
   return [...new Set(filtered)];
 }
 
-// Tenta descobrir um IPv4 local para facilitar o log de inicialização.
+// Descobre um IPv4 local para facilitar o acesso em rede local.
 function getLocalIp() {
   const nets = os.networkInterfaces();
   for (const name of Object.keys(nets)) {

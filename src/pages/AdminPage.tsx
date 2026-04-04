@@ -29,6 +29,7 @@ const PREV_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   delivered: 'ready',
 };
 
+// Opcoes fixas para manter UX previsivel e evitar entradas arbitrarias.
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 20, 25, 30] as const;
 const RECENT_HOURS_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 24] as const;
 
@@ -127,10 +128,12 @@ export default function AdminPage() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
+    // Forca re-render periodico para atualizar badges/tempos sem recarregar dados.
     const interval = setInterval(() => setTimeTick(v => v + 1), 30000);
     return () => clearInterval(interval);
   }, []);
 
+  // Pipeline de filtros: status -> janela temporal -> busca textual.
   const filtered = orders
     .filter(o => filter === 'all' || o.status === filter)
     .filter(o => {
@@ -153,10 +156,12 @@ export default function AdminPage() {
   const paginatedOrders = filtered.slice((currentPage - 1) * ordersPerPage, currentPage * ordersPerPage);
 
   useEffect(() => {
+    // Mudou filtro? volta para pagina 1 para evitar pagina vazia/confusa.
     setCurrentPage(1);
   }, [filter, search, ordersPerPage, timeMode, recentHours, olderDateFrom, olderDateTo]);
 
   useEffect(() => {
+    // Mantem pagina atual sempre dentro dos limites apos qualquer alteracao.
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
     }

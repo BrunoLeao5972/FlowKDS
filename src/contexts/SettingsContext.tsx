@@ -128,6 +128,7 @@ function todayStr(d = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
+// Em desenvolvimento o frontend roda separado da API; em produção usa mesma origem.
 function getApiBase() {
   if (window.location.port === '5173') {
     return `${window.location.protocol}//${window.location.hostname}:8081`;
@@ -164,7 +165,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [enabledServiceModes, setEnabledServiceModes] = useState<ServiceMode[]>(defaultValues.enabledServiceModes);
   const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(true);
 
-  // persist/load
+  // Carrega preferências locais e faz migração leve de campos legados.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -213,6 +214,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     }
   }, []);
 
+  // Busca dados cadastrais do restaurante no backend quando disponível.
   useEffect(() => {
     const loadRestaurantFromDatabase = async () => {
       try {
@@ -243,6 +245,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   }, []);
 
   useEffect(() => {
+    // Salva continuamente preferências operacionais para uso offline-first.
     const toSave = {
       tempoMedio,
       tempoAlerta,
@@ -304,17 +307,17 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     setLastResetDate(d);
   };
 
-  // Keep setters for sounds persisted
+  // Wrappers mantêm a API de contexto explícita para configurações de áudio.
   const _setNewOrderSound = (s: string | null) => setNewOrderSound(s);
   const _setReadyOrderSound = (s: string | null) => setReadyOrderSound(s);
   const _setNewOrderSoundEnabled = (b: boolean) => setNewOrderSoundEnabled(b);
   const _setReadyOrderSoundEnabled = (b: boolean) => setReadyOrderSoundEnabled(b);
 
   const computeNextNumber = (orders: Array<{ number: number; createdAt?: string | number | Date }>) => {
-    // determine base start
+    // Define base inicial conforme modo configurado.
     const start = customStartNumber || 100;
     const isResetMode = orderNumberMode === 'daily-reset' || orderNumberMode === 'custom-start';
-    // when in a reset mode, restrict to orders from the reset date (or today)
+    // Em modos com reset, considera apenas pedidos da data de referência.
     let relevant = orders;
     if (isResetMode) {
       const dateStr = lastResetDate || todayStr();
@@ -323,7 +326,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         const d = new Date(o.createdAt);
         return todayStr(d) === dateStr;
       });
-      // For custom-start we always start at the configured start number when reset date is today
+      // No custom-start, o primeiro pedido do dia inicia no valor configurado.
       if (orderNumberMode === 'custom-start') {
         const today = todayStr();
         if (lastResetDate === today || !lastResetDate) return start;
@@ -333,7 +336,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
 
     const max = relevant.length === 0 ? start - 1 : Math.max(...relevant.map(o => Number(o.number || 0)));
     const next = max + 1;
-    // ensure next is at least start when custom-start or daily-reset
+    // Garante piso mínimo para evitar regressão de numeração.
     return Math.max(next, start);
   };
 
