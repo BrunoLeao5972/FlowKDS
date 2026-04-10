@@ -56,6 +56,19 @@
     --sidebar-accent-foreground: 222.2 47.4% 11.2%;
     --sidebar-border: 215 15% 90%;
     --sidebar-ring: 25 95% 55%;
+
+    /* Theme System Colors (customizable via ThemeContext) */
+    --color-primary: #FF6B35;
+    --color-secondary: #457B9D;
+    --color-background: #FFFFFF;
+    --color-surface: #F5F5F5;
+    --color-text: #1A1A1A;
+    --color-text-secondary: #666666;
+    --color-accent: #E63946;
+    --color-border: #E0E0E0;
+    --color-success: #4CAF50;
+    --color-warning: #FFC107;
+    --color-error: #F44336;
   }
 
   /* Dark theme overrides */
@@ -175,4 +188,66 @@
 .no-spinner::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* Input fields styling for light and dark modes */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="tel"],
+input[type="url"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="time"],
+input[type="search"],
+textarea,
+select {
+  @apply bg-white text-foreground border border-input;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="tel"]:focus,
+input[type="url"]:focus,
+input[type="date"]:focus,
+input[type="datetime-local"]:focus,
+input[type="month"]:focus,
+input[type="time"]:focus,
+input[type="search"]:focus,
+textarea:focus,
+select:focus {
+  @apply outline-none ring-2 ring-ring;
+}
+
+/* Dark mode input styling */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="number"],
+.dark input[type="tel"],
+.dark input[type="url"],
+.dark input[type="date"],
+.dark input[type="datetime-local"],
+.dark input[type="month"],
+.dark input[type="time"],
+.dark input[type="search"],
+.dark textarea,
+.dark select {
+  @apply bg-zinc-900 text-white border-zinc-700;
+}
+
+.dark input[type="text"]::placeholder,
+.dark input[type="email"]::placeholder,
+.dark input[type="password"]::placeholder,
+.dark input[type="number"]::placeholder,
+.dark input[type="tel"]::placeholder,
+.dark input[type="url"]::placeholder,
+.dark input[type="search"]::placeholder,
+.dark textarea::placeholder {
+  @apply text-gray-400;
 }

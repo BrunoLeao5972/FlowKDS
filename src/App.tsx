@@ -8,6 +8,7 @@ import { AppNav } from "@/components/AppNav";
 import AdminPage from "./pages/AdminPage";
 import { SettingsProvider } from '@/contexts/SettingsContext';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 import KitchenPage from "./pages/KitchenPage";
 import PublicDisplayPage from "./pages/PublicDisplayPage";
 import LoginPage from "./pages/LoginPage";
@@ -19,14 +20,16 @@ const queryClient = new QueryClient();
 function AppContent() {
   const location = useLocation();
   const isLoginPage = location.pathname === '/login';
+  const isDisplayPage = location.pathname === '/display';
+  const isFullscreen = isLoginPage || isDisplayPage;
 
   return (
     <>
       <Toaster />
       <Sonner />
-      {!isLoginPage && <AppNav />}
+      {!isFullscreen && <AppNav />}
       
-      <div className={isLoginPage ? '' : 'pb-16'}>
+      <div className={isFullscreen ? '' : 'pb-16'}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<ProtectedRoute permission="admin"><AdminPage /></ProtectedRoute>} />
@@ -37,7 +40,7 @@ function AppContent() {
       </div>
       
       {!isLoginPage && (
-        <footer className="fixed bottom-0 left-0 w-full border-t border-border bg-card text-center text-sm text-foreground py-2 z-40">
+        <footer className="fixed bottom-0 left-0 w-full py-2 text-center text-sm text-foreground z-40">
           <div className="max-w-7xl mx-auto px-4">Solução Sistemas - A sua cozinha ainda mais eficiente</div>
         </footer>
       )}
@@ -49,15 +52,18 @@ const App = () => (
   // Ordem dos providers:
   // 1) Auth define sessão/token
   // 2) Settings usa preferências locais/remotas
-  // 3) Order consome auth+settings para API, socket e impressão
+  // 3) Theme carrega temas do servidor
+  // 4) Order consome auth+settings+theme para API, socket e impressão
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <BrowserRouter>
         <AuthProvider>
           <SettingsProvider>
-            <OrderProvider>
-              <AppContent />
-            </OrderProvider>
+            <ThemeProvider>
+              <OrderProvider>
+                <AppContent />
+              </OrderProvider>
+            </ThemeProvider>
           </SettingsProvider>
         </AuthProvider>
       </BrowserRouter>

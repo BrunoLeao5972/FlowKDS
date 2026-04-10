@@ -387,11 +387,19 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [orders]);
 
   const getAveragePrepTime = useCallback(() => {
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).getTime();
+    const dayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+
     const completed = orders
       .map(order => {
         const started = order.startedAt || order.prepareStartedAt;
         const finished = order.finishedAt || order.readyAt;
         if (!started || !finished) return null;
+
+        const finishedAtMs = finished.getTime();
+        if (finishedAtMs < dayStart || finishedAtMs > dayEnd) return null;
+
         const delta = finished.getTime() - started.getTime();
         return delta > 0 ? delta : null;
       })

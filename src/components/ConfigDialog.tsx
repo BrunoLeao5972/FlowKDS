@@ -14,8 +14,10 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { APP_VERSION } from '@/lib/version';
+// import ThemeConfigPanel from './ThemeConfigPanel'; // ⭐ Desabilitado: usando apenas dark/light mode
 
 /**
  * Props recebidas pelo ConfigDialog.
@@ -26,6 +28,7 @@ interface ConfigDialogProps {
   tempoMedio: number;
   tempoCritico: number;
   tempoAlerta: number;
+  panelColor: string;
   onSave: (
     tempoMedio: number,
     tempoCritico: number,
@@ -49,7 +52,8 @@ interface ConfigDialogProps {
     printerName: string,
     printSize: '58mm' | '80mm' | 'A4',
     printScale: number,
-    serviceModes: ServiceMode[]
+    serviceModes: ServiceMode[],
+    panelColor: string
   ) => void;
   ThemeToggle: React.ReactNode;
   orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
@@ -74,7 +78,7 @@ interface UserData {
   _id: string;
   username: string;
   createdAt: string;
-  /** Lista de permissões: admin | kitchen | display | settings */
+  /** Lista de permissões: admin | kitchen | display | settings | reports */
   permissions: string[];
   /** IDs de setores permitidos para o usuário aceitar/preparar pedidos. */
   sectorIds: string[];
@@ -152,7 +156,7 @@ interface OperationalReportData {
   };
 }
 
-export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, orderNumberMode, customStartNumber, enabledServiceModes, onSave, ThemeToggle }: ConfigDialogProps) {
+export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, panelColor, orderNumberMode, customStartNumber, enabledServiceModes, onSave, ThemeToggle }: ConfigDialogProps) {
   // Controla qual aba está ativa na navegação principal
   const [activeTab, setActiveTab] = useState<'restaurant' | 'users'>('restaurant');
 
@@ -162,6 +166,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
   const [showServiceModesPanel, setShowServiceModesPanel] = useState(false);
   const [showReportsPanel, setShowReportsPanel] = useState(false);
   const [showSupportPanel, setShowSupportPanel] = useState(false);
+  const [showThemePanel, setShowThemePanel] = useState(false);
 
   // Estados de erro e carregamento para o painel de permissões
   const [permError, setPermError] = useState('');
@@ -187,6 +192,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
   const [startNumber, setStartNumber] = useState<number>(customStartNumber || 100);
 
   const settings = useSettings();
+  const { isDarkMode, toggleDarkMode } = useTheme();
 
   // Ref para o input de arquivo de licença (acionado programaticamente pelo botão)
   const licenseInputRef = useRef<HTMLInputElement | null>(null);
@@ -222,6 +228,9 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
   );
   const [serviceModeToAdd, setServiceModeToAdd] = useState('');
 
+  // Estado para cor do painel
+  const [panelColorLocal, setPanelColorLocal] = useState<string>(panelColor || '#FF6B35');
+
   // Lista de usuários carregada da API e paginação dos painéis de Usuários e Permissões
   const [users, setUsers] = useState<UserData[]>([]);
   const [sectors, setSectors] = useState<SectorData[]>([]);
@@ -240,9 +249,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
   const [editUserLoading, setEditUserLoading] = useState(false);
   const [userLoading, setUserLoading] = useState(false);
   const [userError, setUserError] = useState('');
+  const [userSearch, setUserSearch] = useState('');
 
   /** Itens exibidos por página no painel de Usuários */
-  const USERS_PER_PAGE = 3;
+  const USERS_PER_PAGE = 6;
   /** Itens exibidos por página no painel de Permissões */
   const PERMS_PER_PAGE = 8;
 
@@ -344,7 +354,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
         _id: u._id || u.id,
         username: u.username,
         createdAt: u.createdAt,
-        permissions: u.permissions || ['admin', 'kitchen', 'display', 'settings'],
+        permissions: u.permissions || ['admin', 'kitchen', 'display', 'settings', 'reports'],
         sectorIds: Array.isArray(u.sectorIds) ? u.sectorIds.map((s: any) => String(s)) : [],
       }));
       setUsers(normalized);
@@ -669,7 +679,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
         _id: newUser._id || newUser.id,
         username: newUser.username,
         createdAt: newUser.createdAt,
-        permissions: newUser.permissions || ['admin', 'kitchen', 'display', 'settings'],
+        permissions: newUser.permissions || ['admin', 'kitchen', 'display', 'settings', 'reports'],
         sectorIds: Array.isArray(newUser.sectorIds) ? newUser.sectorIds.map((s: any) => String(s)) : [],
       };
       setUsers(prev => [...prev, normalizedNewUser]);
@@ -828,10 +838,15 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
   // Usuários ordenados alfabeticamente (pt-BR) para exibição consistente nos dois painéis
   const sortedUsers = [...users].sort((a, b) => a.username.localeCompare(b.username, 'pt-BR', { sensitivity: 'base' }));
 
+  // Filtro de busca no painel de Usuários
+  const filteredUsers = userSearch.trim()
+    ? sortedUsers.filter(u => u.username.toLowerCase().includes(userSearch.trim().toLowerCase()))
+    : sortedUsers;
+
   // Paginação do painel de Usuários
-  const totalUsersPages = Math.max(1, Math.ceil(sortedUsers.length / USERS_PER_PAGE));
+  const totalUsersPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PER_PAGE));
   const safeUsersPage = Math.min(currentUsersPage, totalUsersPages);
-  const paginatedUsers = sortedUsers.slice((safeUsersPage - 1) * USERS_PER_PAGE, safeUsersPage * USERS_PER_PAGE);
+  const paginatedUsers = filteredUsers.slice((safeUsersPage - 1) * USERS_PER_PAGE, safeUsersPage * USERS_PER_PAGE);
 
   // Paginação do painel de Permissões (limite maior pois não exibe botão de exclusão)
   const totalPermsPages = Math.max(1, Math.ceil(sortedUsers.length / PERMS_PER_PAGE));
@@ -870,6 +885,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
       setShowServiceModesPanel(false);
       setShowReportsPanel(false);
       setShowSupportPanel(false);
+      // setShowThemePanel(false); // ⭐ Disabled
       return;
     }
 
@@ -881,6 +897,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
       setShowServiceModesPanel(false);
       setShowReportsPanel(false);
       setShowSupportPanel(false);
+      // setShowThemePanel(false); // ⭐ Disabled
       return;
     }
 
@@ -891,6 +908,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
       setShowServiceModesPanel(true);
       setShowReportsPanel(false);
       setShowSupportPanel(false);
+      // setShowThemePanel(false); // ⭐ Disabled
       return;
     }
 
@@ -918,7 +936,8 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
       printerName.trim(),
       printSize,
       115,
-      selectedServiceModes
+      selectedServiceModes,
+      panelColorLocal
     );
   };
 
@@ -939,136 +958,81 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
     setSelectedServiceModes(prev => prev.filter(item => item !== mode));
   };
 
+  // Função helpers para resetar painéis
+  const resetPanels = () => {
+    setShowUsersPanel(false);
+    setShowPermissionsPanel(false);
+    setShowServiceModesPanel(false);
+    setShowReportsPanel(false);
+    setShowSupportPanel(false);
+    setShowThemePanel(false);
+  };
+
+  // Menu items
+  const menuItems = [
+    { id: 'restaurant', label: '📋 Cadastros', icon: 'catalog' },
+    { id: 'users', label: '👥 Usuários', panel: 'users' },
+    { id: 'permissions', label: '🔐 Permissões', panel: 'permissions' },
+    { id: 'modes', label: '📦 Modalidades', panel: 'modes' },
+    { id: 'reports', label: '📊 Relatórios', panel: 'reports' },
+    { id: 'theme', label: '🌓 Tema', panel: 'theme' },
+    { id: 'support', label: '❓ Suporte', panel: 'support' },
+  ];
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg border-2 border-orange-500 w-[92%] max-w-2xl max-h-[78vh] flex flex-col">
-        {/* Header e Abas */}
-        <div className="border-b border-border rounded-t-2xl">
-          <div className="p-4 pb-2">
-            <h2 className="font-bold text-lg">Configurações</h2>
-          </div>
-          <div className="flex gap-2 px-4 pb-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setShowUsersPanel(false);
-                  setShowPermissionsPanel(false);
-                  setShowServiceModesPanel(false);
-                  setShowReportsPanel(false);
-                  setShowSupportPanel(false);
-                  setActiveTab(tab.id);
-                }}
-                className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
-                  !showUsersPanel && !showPermissionsPanel && !showServiceModesPanel && !showReportsPanel && !showSupportPanel && activeTab === tab.id
-                    ? 'bg-orange-400 text-white'
-                    : 'bg-muted text-muted-foreground hover:bg-orange-100'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowPermissionsPanel(false);
-                setShowServiceModesPanel(false);
-                setShowReportsPanel(false);
-                setShowSupportPanel(false);
-                setShowUsersPanel(true);
-                setActiveTab('users');
-              }}
-              className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
-                showUsersPanel
-                  ? 'bg-orange-400 text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-orange-100'
-              }`}
-            >
-              Usuários
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowUsersPanel(false);
-                setShowServiceModesPanel(false);
-                setShowReportsPanel(false);
-                setShowSupportPanel(false);
-                setShowPermissionsPanel(true);
-                setActiveTab('users');
-              }}
-              className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
-                showPermissionsPanel
-                  ? 'bg-orange-400 text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-orange-100'
-              }`}
-            >
-              Permissões
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowUsersPanel(false);
-                setShowPermissionsPanel(false);
-                setShowReportsPanel(false);
-                setShowSupportPanel(false);
-                setShowServiceModesPanel(true);
-                setActiveTab('users');
-              }}
-              className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
-                showServiceModesPanel
-                  ? 'bg-orange-400 text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-orange-100'
-              }`}
-            >
-              Modalidades
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowUsersPanel(false);
-                setShowPermissionsPanel(false);
-                setShowServiceModesPanel(false);
-                setShowSupportPanel(false);
-                setShowReportsPanel(true);
-                setActiveTab('users');
-              }}
-              className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
-                showReportsPanel
-                  ? 'bg-orange-400 text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-orange-100'
-              }`}
-            >
-              Relatórios
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setShowUsersPanel(false);
-                setShowPermissionsPanel(false);
-                setShowServiceModesPanel(false);
-                setShowReportsPanel(false);
-                setShowSupportPanel(true);
-                setActiveTab('users');
-              }}
-              className={`shrink-0 px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ${
-                showSupportPanel
-                  ? 'bg-orange-400 text-white'
-                  : 'bg-muted text-muted-foreground hover:bg-orange-100'
-              }`}
-            >
-              Suporte
-            </button>
-          </div>
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-lg border-2 border-orange-500 w-[92%] max-w-5xl h-[88vh] flex flex-col">
+        {/* Header */}
+        <div className="border-b border-border rounded-t-2xl bg-gradient-to-r from-orange-500/10 to-orange-400/5 px-6 py-4">
+          <h2 className="font-bold text-2xl text-foreground">⚙️ Configurações do KDS</h2>
+          <p className="text-xs text-muted-foreground mt-1">Personalize e gerencie toda a operação do sistema</p>
         </div>
 
-        {/* Conteúdo das Abas */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {!showUsersPanel && activeTab === 'restaurant' && (
+        {/* Layout: Menu Esquerda + Conteúdo Direita */}
+        <div className="flex-1 flex min-h-0">
+          {/* Menu Lateral (Esquerda) */}
+          <div className="w-40 border-r border-border bg-muted/30 overflow-y-auto flex flex-col">
+            <div className="p-3 space-y-2">
+              {menuItems.map(item => {
+                const isActive = item.panel
+                  ? (item.panel === 'users' && showUsersPanel) ||
+                    (item.panel === 'permissions' && showPermissionsPanel) ||
+                    (item.panel === 'modes' && showServiceModesPanel) ||
+                    (item.panel === 'reports' && showReportsPanel) ||
+                    (item.panel === 'theme' && showThemePanel) ||
+                    (item.panel === 'support' && showSupportPanel)
+                  : activeTab === item.id;
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      resetPanels();
+                      if (item.panel === 'users') setShowUsersPanel(true);
+                      else if (item.panel === 'permissions') setShowPermissionsPanel(true);
+                      else if (item.panel === 'modes') setShowServiceModesPanel(true);
+                      else if (item.panel === 'reports') setShowReportsPanel(true);
+                      else if (item.panel === 'theme') setShowThemePanel(true);
+                      else if (item.panel === 'support') setShowSupportPanel(true);
+                      else setActiveTab(item.id);
+                    }}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-orange-500 text-white shadow-md'
+                        : 'text-foreground hover:bg-orange-100 dark:hover:bg-orange-900/30'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Conteúdo Principal (Direita) */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+
+          {!showUsersPanel && !showPermissionsPanel && !showServiceModesPanel && !showReportsPanel && !showThemePanel && !showSupportPanel && activeTab === 'restaurant' && (
             <div className="space-y-3 max-w-2xl">
               <div className="rounded-md border border-border bg-muted/10 p-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2.5">
@@ -1170,35 +1134,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
               </div>
 
               <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-medium">Tema do sistema</p>
-                  <div className="shrink-0">{ThemeToggle}</div>
-                </div>
-                <div className="border-t border-border/60" />
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium">Animações de alerta</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Cards críticos piscam em vermelho para chamar atenção</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => settings.setAnimationsEnabled(!settings.animationsEnabled)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      settings.animationsEnabled ? 'bg-primary' : 'bg-muted-foreground/30'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        settings.animationsEnabled ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {restaurantError && <p className="text-sm text-red-600">{restaurantError}</p>}
-
-              <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
                 <p className="text-sm font-medium">Timer e Impressao</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
@@ -1266,27 +1201,39 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
 
           {/* TAB: PERMISSÕES */}
           {showPermissionsPanel && (
-            <div className="space-y-3">
-              <h3 className="font-semibold text-base">Permissões de Acesso</h3>
-              <p className="text-sm text-muted-foreground">Defina quais páginas cada usuário pode acessar.</p>
+            <div className="space-y-4">
+              <div>
+                <h3 className="font-semibold text-base">Permissões de Acesso</h3>
+                <p className="text-sm text-muted-foreground">Defina quais telas cada usuário pode acessar e os setores permitidos.</p>
+              </div>
               {permError && <p className="text-sm text-red-600">{permError}</p>}
               {users.length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nenhum usuário cadastrado.</p>
               ) : (
-                <div className="space-y-1.5">
-                  {paginatedPermUsers.map(user => (
-                    <div key={user._id} className="bg-muted/50 px-2 py-2.5 rounded-md space-y-2">
-                      <div className="grid grid-cols-5 gap-2 items-start">
-                        <span className="text-sm font-medium truncate">{formatDisplayName(user.username)}</span>
-                        {([
-                          { key: 'admin', label: 'Admin' },
-                          { key: 'kitchen', label: 'Cozinha' },
-                          { key: 'display', label: 'Painel' },
-                          { key: 'settings', label: 'Config.' },
-                        ] as const).map(perm => (
-                          <div key={perm.key} className="flex flex-col items-center gap-1">
-                            <span className="text-[11px] font-medium text-muted-foreground text-center leading-tight">{perm.label}</span>
-                            <label className="flex justify-center cursor-pointer">
+                <div className="rounded-lg border border-border overflow-hidden">
+                  {/* Cabeçalho da tabela */}
+                  <div className="grid grid-cols-[1fr_56px_56px_56px_56px_56px] gap-0 bg-muted px-4 py-2 border-b border-border">
+                    <span className="text-xs font-semibold text-muted-foreground">Usuário</span>
+                    {(['Admin', 'Cozinha', 'Painel', 'Config.', 'Relatórios'] as const).map(label => (
+                      <span key={label} className="text-xs font-semibold text-muted-foreground text-center">{label}</span>
+                    ))}
+                  </div>
+
+                  {/* Linhas de usuário */}
+                  <div className="divide-y divide-border">
+                    {paginatedPermUsers.map(user => (
+                      <div key={user._id} className="px-4 py-3 space-y-2 hover:bg-muted/30 transition-colors">
+                        {/* Linha: nome + checkboxes */}
+                        <div className="grid grid-cols-[1fr_56px_56px_56px_56px_56px] gap-0 items-center">
+                          <span className="text-sm font-medium truncate">{formatDisplayName(user.username)}</span>
+                          {([
+                            { key: 'admin' },
+                            { key: 'kitchen' },
+                            { key: 'display' },
+                            { key: 'settings' },
+                            { key: 'reports' },
+                          ] as const).map(perm => (
+                            <label key={perm.key} className="flex justify-center cursor-pointer">
                               <input
                                 type="checkbox"
                                 className="w-4 h-4 accent-orange-500"
@@ -1294,87 +1241,73 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                                 onChange={() => handleTogglePermission(user._id, perm.key, user.permissions)}
                               />
                             </label>
-                          </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
 
-                      <div className="rounded-md border border-border bg-background p-2">
-                        <p className="text-xs font-medium mb-1">Setores permitidos para aceitar pedido:</p>
-                        {sectors.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">Nenhum setor sincronizado.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="flex gap-2">
+                        {/* Linha: setores (compacta) */}
+                        {sectors.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 pl-0">
+                            <span className="text-[11px] text-muted-foreground font-medium shrink-0">Setores:</span>
+                            {user.sectorIds.length === 0 ? (
+                              <span className="text-[11px] text-muted-foreground italic">nenhum</span>
+                            ) : (
+                              user.sectorIds.map(sectorId => (
+                                <span key={`${user._id}-sector-${sectorId}`} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-800 text-[11px] font-medium">
+                                  {getSectorName(sectorId)}
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleUpdateUserSectors(user._id, user.sectorIds.filter(id => id !== sectorId))}
+                                    className="text-orange-600 hover:text-orange-900 leading-none"
+                                    title="Remover setor"
+                                  >×</button>
+                                </span>
+                              ))
+                            )}
+                            {/* Seletor inline para adicionar setor */}
+                            {sectors.filter(s => !user.sectorIds.includes(s.id)).length > 0 && (
                               <select
-                                className="input h-8 text-xs flex-1"
+                                className="h-6 text-[11px] rounded border border-border bg-background text-foreground px-1 cursor-pointer"
                                 value={userSectorToAddByUserId[user._id] || ''}
-                                onChange={e => setUserSectorToAddByUserId(prev => ({ ...prev, [user._id]: e.target.value }))}
+                                onChange={e => {
+                                  const sectorId = e.target.value;
+                                  if (!sectorId) return;
+                                  void handleUpdateUserSectors(user._id, [...user.sectorIds, sectorId]);
+                                  setUserSectorToAddByUserId(prev => ({ ...prev, [user._id]: '' }));
+                                }}
                               >
-                                <option value="">Selecione um setor...</option>
+                                <option value="">+ setor</option>
                                 {sectors
                                   .filter(sector => !user.sectorIds.includes(sector.id))
                                   .map(sector => (
                                     <option key={`${user._id}-opt-${sector.id}`} value={sector.id}>{sector.name}</option>
                                   ))}
                               </select>
-                              <button
-                                type="button"
-                                disabled={!userSectorToAddByUserId[user._id]}
-                                onClick={() => {
-                                  const sectorId = String(userSectorToAddByUserId[user._id] || '').trim();
-                                  if (!sectorId) return;
-                                  void handleUpdateUserSectors(user._id, [...user.sectorIds, sectorId]);
-                                  setUserSectorToAddByUserId(prev => ({ ...prev, [user._id]: '' }));
-                                }}
-                                className="h-8 px-2 rounded-md border border-orange-300 text-orange-700 text-xs font-semibold disabled:opacity-50"
-                              >
-                                Adicionar
-                              </button>
-                            </div>
-
-                            <div className="min-h-8 flex flex-wrap gap-1">
-                              {user.sectorIds.length === 0 ? (
-                                <span className="text-[11px] text-muted-foreground">Nenhum setor liberado.</span>
-                              ) : (
-                                user.sectorIds.map(sectorId => (
-                                  <span key={`${user._id}-sector-${sectorId}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-xs font-medium">
-                                    {getSectorName(sectorId)}
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleUpdateUserSectors(user._id, user.sectorIds.filter(id => id !== sectorId))}
-                                      className="text-orange-700 hover:text-orange-900"
-                                      title="Remover setor"
-                                    >
-                                      ×
-                                    </button>
-                                  </span>
-                                ))
-                              )}
-                            </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
 
+                  {/* Paginação dentro do card */}
                   {totalPermsPages > 1 && (
-                    <div className="flex items-center justify-between pt-2">
+                    <div className="flex items-center justify-between px-4 py-2 border-t border-border bg-muted/30">
                       <button
                         type="button"
                         onClick={() => setCurrentPermsPage(prev => Math.max(1, prev - 1))}
                         disabled={safePermsPage === 1}
-                        className="h-8 px-3 rounded-md border border-input bg-background text-sm disabled:opacity-50"
+                        className="h-7 px-3 rounded-md border border-input bg-background text-xs disabled:opacity-50"
                       >
                         Anterior
                       </button>
                       <span className="text-xs text-muted-foreground">
-                        Página {safePermsPage} de {totalPermsPages}
+                        {safePermsPage} / {totalPermsPages}
                       </span>
                       <button
                         type="button"
                         onClick={() => setCurrentPermsPage(prev => Math.min(totalPermsPages, prev + 1))}
                         disabled={safePermsPage === totalPermsPages}
-                        className="h-8 px-3 rounded-md border border-input bg-background text-sm disabled:opacity-50"
+                        className="h-7 px-3 rounded-md border border-input bg-background text-xs disabled:opacity-50"
                       >
                         Próxima
                       </button>
@@ -1684,6 +1617,41 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
             </div>
           )}
 
+          {/* TAB: TEMA */}
+          {showThemePanel && (
+            <div className="space-y-4">
+              <div className="rounded-md border border-border p-4 bg-muted/10 space-y-3">
+                <h3 className="font-semibold text-base">🌙 Modo Noturno</h3>
+                <p className="text-xs text-muted-foreground">Ative o modo escuro para melhor visualização em ambientes com pouca luz</p>
+                
+                <div className="border-t border-border/60 mt-3 pt-3" />
+                
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Modo Escuro</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {isDarkMode ? '✓ Ativado' : '○ Desativado'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleDarkMode}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      isDarkMode ? 'bg-blue-600' : 'bg-gray-300'
+                    }`}
+                    title={isDarkMode ? 'Desativar modo escuro' : 'Ativar modo escuro'}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        isDarkMode ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB: SUPORTE */}
           {showSupportPanel && (
             <div className="space-y-4">
@@ -1762,14 +1730,24 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
           {/* TAB: USUÁRIOS */}
           {showUsersPanel && (
             <div className="space-y-3">
-              <h3 className="font-semibold text-base">Gerenciar Usuários</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-base">Gerenciar Usuários</h3>
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="px-2 py-0.5 rounded-full bg-muted border border-border font-medium">{users.length} usuário{users.length !== 1 ? 's' : ''}</span>
+                  {users.filter(u => u.permissions.includes('admin')).length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 font-medium">
+                      {users.filter(u => u.permissions.includes('admin')).length} admin
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4 items-start">
                 {/* Formulário de novo usuário */}
-                <div className="bg-muted/50 p-3 rounded-md space-y-2.5">
-                  <h4 className="text-sm font-medium">Criar novo usuário</h4>
+                <div className="bg-muted/50 p-3 rounded-lg border border-border space-y-2.5">
+                  <h4 className="text-sm font-semibold">Criar novo usuário</h4>
                   <div>
-                    <label className="block text-sm mb-1">Nome de usuário:</label>
+                    <label className="block text-xs font-medium mb-1 text-muted-foreground">Nome de usuário</label>
                     <input
                       type="text"
                       className="input w-full h-9 text-sm"
@@ -1779,7 +1757,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                     />
                   </div>
                   <div>
-                    <label className="block text-sm mb-1">Senha:</label>
+                    <label className="block text-xs font-medium mb-1 text-muted-foreground">Senha</label>
                     <input
                       type="password"
                       className="input w-full h-9 text-sm"
@@ -1788,85 +1766,63 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                       placeholder="Digite a senha"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm mb-1">Setores permitidos:</label>
-                    {sectors.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Nenhum setor sincronizado ainda.</p>
-                    ) : (
-                      <div className="space-y-2 rounded-md border border-border bg-background p-2">
-                        <div className="flex gap-2">
-                          <select
-                            className="input h-8 text-xs flex-1"
-                            value={newUserSectorToAdd}
-                            onChange={e => setNewUserSectorToAdd(e.target.value)}
-                          >
-                            <option value="">Selecione um setor...</option>
-                            {sectors
-                              .filter(sector => !newUserSectorIds.includes(sector.id))
-                              .map(sector => (
-                                <option key={sector.id} value={sector.id}>{sector.name}</option>
-                              ))}
-                          </select>
-                          <button
-                            type="button"
-                            onClick={handleAddSectorToNewUser}
-                            disabled={!newUserSectorToAdd}
-                            className="h-8 px-2 rounded-md border border-orange-300 text-orange-700 text-xs font-semibold disabled:opacity-50"
-                          >
-                            Adicionar
-                          </button>
-                        </div>
-
-                        <div className="min-h-8 flex flex-wrap gap-1">
-                          {newUserSectorIds.length === 0 ? (
-                            <span className="text-[11px] text-muted-foreground">Nenhum setor adicionado.</span>
-                          ) : (
-                            newUserSectorIds.map(sectorId => (
-                              <span key={sectorId} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-xs font-medium">
-                                {getSectorName(sectorId)}
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveSectorFromNewUser(sectorId)}
-                                  className="text-orange-700 hover:text-orange-900"
-                                  title="Remover setor"
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    <p className="text-[11px] text-muted-foreground mt-1">O usuário pode ter múltiplos setores.</p>
-                  </div>
                   <button
                     onClick={handleAddUser}
                     disabled={userLoading}
-                    className="w-full h-9 px-3 rounded-md bg-green-500 text-white text-sm font-medium hover:bg-green-600 disabled:opacity-60 flex items-center justify-center gap-2"
+                    className="w-full h-9 px-3 rounded-md bg-green-500 text-white text-sm font-semibold hover:bg-green-600 disabled:opacity-60 flex items-center justify-center gap-2"
                   >
                     <Plus className="w-3.5 h-3.5" /> {userLoading ? 'Adicionando...' : 'Adicionar usuário'}
                   </button>
                   {userError && <p className="text-sm text-red-600 text-center">{userError}</p>}
+
+                  {/* Dica de acesso */}
+                  <div className="rounded-md border border-border bg-background p-2.5 space-y-1 mt-1">
+                    <p className="text-[11px] font-semibold text-muted-foreground">Níveis de acesso</p>
+                    {[
+                      { key: 'Admin', color: 'bg-orange-100 text-orange-700', desc: 'Configurações do sistema' },
+                      { key: 'Cozinha', color: 'bg-blue-100 text-blue-700', desc: 'Tela de produção KDS' },
+                      { key: 'Painel', color: 'bg-green-100 text-green-700', desc: 'Painel público de retirada' },
+                      { key: 'Config.', color: 'bg-purple-100 text-purple-700', desc: 'Acesso às configurações' },
+                      { key: 'Relatórios', color: 'bg-red-100 text-red-700', desc: 'Visualizar relatórios' },
+                    ].map(item => (
+                      <div key={item.key} className="flex items-center gap-2">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${item.color} shrink-0`}>{item.key}</span>
+                        <span className="text-[11px] text-muted-foreground">{item.desc}</span>
+                      </div>
+                    ))}
+                    <p className="text-[10px] text-muted-foreground pt-1">Configure em <strong>Permissões</strong> após criar.</p>
+                  </div>
                 </div>
 
                 {/* Lista de usuários */}
-                <div>
-                  <h4 className="text-sm font-medium mb-2">Usuários cadastrados:</h4>
+                <div className="space-y-2">
+                  {/* Barra de busca */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      className="input w-full h-8 text-sm pl-7"
+                      placeholder="Buscar usuário..."
+                      value={userSearch}
+                      onChange={e => { setUserSearch(e.target.value); setCurrentUsersPage(1); }}
+                    />
+                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">🔍</span>
+                  </div>
+
                   {sortedUsers.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Nenhum usuário criado ainda.</p>
+                    <p className="text-sm text-muted-foreground py-4 text-center">Nenhum usuário criado ainda.</p>
+                  ) : filteredUsers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">Nenhum resultado para "{userSearch}".</p>
                   ) : (
-                    <div className="space-y-2">
-                      <div className="space-y-1.5">
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <div className="divide-y divide-border">
                         {paginatedUsers.map(user => (
-                          <div key={user._id} className="bg-muted p-2.5 rounded-md space-y-2">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <span className="text-sm font-medium">{formatDisplayName(user.username)}</span>
-                                <p className="text-xs text-muted-foreground">Criado em {new Date(user.createdAt).toLocaleDateString('pt-BR')}</p>
-                                <p className="text-xs text-muted-foreground">Setores permitidos: {user.sectorIds.length}</p>
+                          <div key={user._id} className="px-3 py-2.5 hover:bg-muted/30 transition-colors space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <span className="text-sm font-semibold truncate block">{formatDisplayName(user.username)}</span>
+                                <p className="text-[11px] text-muted-foreground">desde {new Date(user.createdAt).toLocaleDateString('pt-BR')}</p>
                               </div>
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-1 shrink-0">
                                 <button
                                   onClick={() => startEditUser(user)}
                                   className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-900 rounded text-blue-600 transition-colors"
@@ -1884,8 +1840,32 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                               </div>
                             </div>
 
+                            {/* Badges de permissão */}
+                            <div className="flex flex-wrap gap-1">
+                              {[
+                                { key: 'admin', label: 'Admin', active: 'bg-orange-100 text-orange-700 border-orange-200', inactive: 'bg-muted text-muted-foreground border-border opacity-40' },
+                                { key: 'kitchen', label: 'Cozinha', active: 'bg-blue-100 text-blue-700 border-blue-200', inactive: 'bg-muted text-muted-foreground border-border opacity-40' },
+                                { key: 'display', label: 'Painel', active: 'bg-green-100 text-green-700 border-green-200', inactive: 'bg-muted text-muted-foreground border-border opacity-40' },
+                                { key: 'settings', label: 'Config.', active: 'bg-purple-100 text-purple-700 border-purple-200', inactive: 'bg-muted text-muted-foreground border-border opacity-40' },
+                                { key: 'reports', label: 'Relatórios', active: 'bg-red-100 text-red-700 border-red-200', inactive: 'bg-muted text-muted-foreground border-border opacity-40' },
+                              ].map(perm => (
+                                <span
+                                  key={perm.key}
+                                  className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${user.permissions.includes(perm.key) ? perm.active : perm.inactive}`}
+                                >
+                                  {perm.label}
+                                </span>
+                              ))}
+                              {user.sectorIds.length > 0 && (
+                                <span className="px-1.5 py-0.5 rounded border border-gray-200 bg-gray-100 text-gray-600 text-[10px] font-medium">
+                                  {user.sectorIds.length} setor{user.sectorIds.length !== 1 ? 'es' : ''}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Formulário de edição inline */}
                             {editingUserId === user._id && (
-                              <div className="rounded-md border border-border bg-background p-2.5 space-y-2">
+                              <div className="rounded-md border border-border bg-background p-2.5 space-y-2 mt-1">
                                 <div>
                                   <label className="block text-xs mb-1">Editar nome de usuário:</label>
                                   <input
@@ -1930,23 +1910,23 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
                       </div>
 
                       {totalUsersPages > 1 && (
-                        <div className="flex items-center justify-between pt-1">
+                        <div className="flex items-center justify-between px-3 py-2 border-t border-border bg-muted/30">
                           <button
                             type="button"
                             onClick={() => setCurrentUsersPage(prev => Math.max(1, prev - 1))}
                             disabled={safeUsersPage === 1}
-                            className="h-8 px-3 rounded-md border border-input bg-background text-sm disabled:opacity-50"
+                            className="h-7 px-3 rounded-md border border-input bg-background text-xs disabled:opacity-50"
                           >
                             Anterior
                           </button>
                           <span className="text-xs text-muted-foreground">
-                            Página {safeUsersPage} de {totalUsersPages}
+                            {safeUsersPage} / {totalUsersPages}
                           </span>
                           <button
                             type="button"
                             onClick={() => setCurrentUsersPage(prev => Math.min(totalUsersPages, prev + 1))}
                             disabled={safeUsersPage === totalUsersPages}
-                            className="h-8 px-3 rounded-md border border-input bg-background text-sm disabled:opacity-50"
+                            className="h-7 px-3 rounded-md border border-input bg-background text-xs disabled:opacity-50"
                           >
                             Próxima
                           </button>
@@ -1958,15 +1938,26 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, or
               </div>
             </div>
           )}
+          </div>
         </div>
 
         {/* Footer com botão Ok */}
-        <div className="border-t border-border p-3 flex justify-end rounded-b-2xl">
+        <div className="border-t border-border p-4 flex justify-end gap-3 rounded-b-2xl bg-gradient-to-r from-orange-50/50 to-orange-100/30 dark:from-orange-950/20 dark:to-orange-900/20">
           <button
-            className="h-9 px-4 rounded-lg text-sm font-semibold border border-orange-400 bg-orange-50 text-orange-700 shadow-sm hover:bg-orange-500 hover:border-orange-500 hover:text-white transition-colors"
+            type="button"
+            onClick={() => {
+              resetPanels();
+              setActiveTab('restaurant');
+            }}
+            className="h-9 px-4 rounded-lg text-sm font-semibold border border-input bg-background text-foreground hover:bg-muted transition-colors"
+          >
+            Voltar
+          </button>
+          <button
+            className="h-9 px-6 rounded-lg text-sm font-semibold border border-orange-400 bg-orange-500 text-white shadow-sm hover:bg-orange-600 hover:border-orange-600 transition-colors"
             onClick={handleSave}
           >
-            Ok
+            ✓ Salvar
           </button>
         </div>
       </div>

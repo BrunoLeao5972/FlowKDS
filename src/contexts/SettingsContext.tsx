@@ -56,6 +56,9 @@ type Settings = {
   setOrderNumberMode: (m: OrderNumberMode) => void;
   setCustomStartNumber: (n: number) => void;
   setEnabledServiceModes: (modes: ServiceMode[]) => void;
+  // panel color settings
+  panelColor: string;
+  setPanelColor: (color: string) => void;
   // kitchen animations toggle
   animationsEnabled: boolean;
   setAnimationsEnabled: (v: boolean) => void;
@@ -116,6 +119,8 @@ const defaultValues: Settings = {
   setOrderNumberMode: () => {},
   setCustomStartNumber: () => {},
   setEnabledServiceModes: () => {},
+  panelColor: '#FF6B35',
+  setPanelColor: () => {},
   animationsEnabled: true,
   setAnimationsEnabled: () => {},
   computeNextNumber: () => 101,
@@ -163,6 +168,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [customStartNumber, setCustomStartNumber] = useState<number>(defaultValues.customStartNumber);
   const [lastResetDate, setLastResetDate] = useState<string | null>(defaultValues.lastResetDate);
   const [enabledServiceModes, setEnabledServiceModes] = useState<ServiceMode[]>(defaultValues.enabledServiceModes);
+  const [panelColor, setPanelColor] = useState<string>(defaultValues.panelColor);
   const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(true);
 
   // Carrega preferências locais e faz migração leve de campos legados.
@@ -207,6 +213,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (typeof parsed.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(parsed.readyOrderSoundEnabled);
         if (typeof parsed.printerName === 'string') setPrinterName(parsed.printerName);
         if (parsed.printSize === '58mm' || parsed.printSize === '80mm' || parsed.printSize === 'A4') setPrintSize(parsed.printSize);
+        if (typeof parsed.panelColor === 'string') setPanelColor(parsed.panelColor);
         setPrintScale(FIXED_PRINT_SCALE);
       }
     } catch (e) {
@@ -228,6 +235,9 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (!response.ok) return;
 
         const data = await response.json();
+        if (typeof data.tempoMedio === 'number') setTempoMedio(data.tempoMedio);
+        if (typeof data.tempoAlerta === 'number') setTempoAlerta(data.tempoAlerta);
+        if (typeof data.tempoCritico === 'number') setTempoCritico(data.tempoCritico);
         if (typeof data.tradeName === 'string') setRestaurantTradeName(data.tradeName);
         if (typeof data.legalName === 'string') setRestaurantLegalName(data.legalName);
         if (typeof data.cnpj === 'string') setRestaurantCnpj(data.cnpj);
@@ -236,6 +246,28 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (typeof data.number === 'string') setRestaurantNumber(data.number);
         if (typeof data.city === 'string') setRestaurantCity(data.city);
         if (typeof data.complement === 'string') setRestaurantComplement(data.complement);
+        if (data.orderNumberMode === 'continuous' || data.orderNumberMode === 'daily-reset' || data.orderNumberMode === 'custom-start') {
+          setOrderNumberMode(data.orderNumberMode);
+        }
+        if (typeof data.customStartNumber === 'number') setCustomStartNumber(data.customStartNumber);
+        if (typeof data.lastResetDate === 'string' || data.lastResetDate === null) setLastResetDate(data.lastResetDate ?? null);
+        if (typeof data.licenseFileName === 'string' || data.licenseFileName === null) setLicenseFileName(data.licenseFileName ?? null);
+        if (typeof data.licenseContent === 'string' || data.licenseContent === null) setLicenseContent(data.licenseContent ?? null);
+        if (typeof data.newOrderSound === 'string' || data.newOrderSound === null) setNewOrderSound(data.newOrderSound ?? null);
+        if (typeof data.readyOrderSound === 'string' || data.readyOrderSound === null) setReadyOrderSound(data.readyOrderSound ?? null);
+        if (typeof data.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(data.newOrderSoundEnabled);
+        if (typeof data.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(data.readyOrderSoundEnabled);
+        if (typeof data.printerName === 'string') setPrinterName(data.printerName);
+        if (data.printSize === '58mm' || data.printSize === '80mm' || data.printSize === 'A4') setPrintSize(data.printSize);
+        if (typeof data.printScale === 'number' && Number.isFinite(data.printScale)) setPrintScale(data.printScale);
+        if (typeof data.panelColor === 'string') setPanelColor(data.panelColor);
+        if (typeof data.animationsEnabled === 'boolean') setAnimationsEnabled(data.animationsEnabled);
+        if (Array.isArray(data.enabledServiceModes)) {
+          const normalizedModes = data.enabledServiceModes
+            .map((mode: unknown) => String(mode || '').trim().toLowerCase())
+            .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
+          setEnabledServiceModes(normalizedModes.length ? [...new Set(normalizedModes)] : [...ALL_SERVICE_MODES]);
+        }
       } catch (error) {
         // ignore to keep app usable offline
       }
@@ -271,6 +303,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
       printerName,
       printSize,
       printScale: FIXED_PRINT_SCALE,
+      panelColor,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
@@ -300,6 +333,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     printerName,
     printSize,
     printScale,
+    panelColor,
   ]);
 
   const touchResetDate = (date?: Date) => {
@@ -390,6 +424,8 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         setOrderNumberMode,
         setCustomStartNumber,
         setEnabledServiceModes,
+        panelColor,
+        setPanelColor,
         animationsEnabled,
         setAnimationsEnabled,
         computeNextNumber,

@@ -371,7 +371,16 @@ function buildCreatedAtMatch(fromRaw, toRaw) {
   }
 
   if (from === null && to === null) {
-    return { match: {} };
+    // Se nenhuma data foi especificada, usa o dia de hoje (00:00:00 até 23:59:59)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const fromToday = today.getTime();
+    
+    const endOfDay = new Date(today);
+    endOfDay.setHours(23, 59, 59, 999);
+    const toToday = endOfDay.getTime();
+    
+    return { match: { createdAt: { $gte: fromToday, $lte: toToday } } };
   }
 
   const createdAt = {};
@@ -402,9 +411,31 @@ function toSafeString(value) {
   return String(value).trim();
 }
 
+function toSafeNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function toSafeBoolean(value, fallback) {
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return fallback;
+}
+
 function normalizeRestaurantPayload(payload) {
   const raw = payload || {};
+  const printSize = ['58mm', '80mm', 'A4'].includes(String(raw.printSize || '').trim())
+    ? String(raw.printSize).trim()
+    : '80mm';
+  const orderNumberMode = ['continuous', 'daily-reset', 'custom-start'].includes(String(raw.orderNumberMode || '').trim())
+    ? String(raw.orderNumberMode).trim()
+    : 'continuous';
+
   return {
+    tempoMedio: toSafeNumber(raw.tempoMedio, 15),
+    tempoAlerta: toSafeNumber(raw.tempoAlerta, 20),
+    tempoCritico: toSafeNumber(raw.tempoCritico, 25),
     tradeName: toSafeString(raw.tradeName),
     legalName: toSafeString(raw.legalName),
     cnpj: toSafeString(raw.cnpj),
@@ -413,7 +444,72 @@ function normalizeRestaurantPayload(payload) {
     number: toSafeString(raw.number),
     city: toSafeString(raw.city),
     complement: toSafeString(raw.complement),
+    orderNumberMode,
+    customStartNumber: toSafeNumber(raw.customStartNumber, 100),
+    lastResetDate: raw.lastResetDate ? toSafeString(raw.lastResetDate) : null,
+    licenseFileName: raw.licenseFileName === null ? null : (raw.licenseFileName ? toSafeString(raw.licenseFileName) : null),
+    licenseContent: raw.licenseContent === null ? null : (raw.licenseContent ? String(raw.licenseContent) : null),
+    newOrderSound: raw.newOrderSound === null ? null : (raw.newOrderSound ? String(raw.newOrderSound) : null),
+    readyOrderSound: raw.readyOrderSound === null ? null : (raw.readyOrderSound ? String(raw.readyOrderSound) : null),
+    newOrderSoundEnabled: toSafeBoolean(raw.newOrderSoundEnabled, true),
+    readyOrderSoundEnabled: toSafeBoolean(raw.readyOrderSoundEnabled, true),
+    printerName: toSafeString(raw.printerName),
+    printSize,
+    printScale: toSafeNumber(raw.printScale, 115),
+    panelColor: raw.panelColor ? toSafeString(raw.panelColor) : '#FF6B35',
+    animationsEnabled: toSafeBoolean(raw.animationsEnabled, true),
+    enabledServiceModes: Array.isArray(raw.enabledServiceModes) 
+      ? raw.enabledServiceModes.map(m => String(m).trim()).filter(Boolean)
+      : [],
   };
+}
+
+function updateEnvFile(updates) {
+  try {
+    const envPath = path.join(RUNTIME_DIR, '.env');
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf-8');
+    }
+
+    const lines = content.split('\n');
+    const updatedKeys = new Set(Object.keys(updates));
+    const newLines = [];
+
+    // Atualiza linhas existentes ou substitui
+    lines.forEach(line => {
+      const trimmed = line.trim();
+      const match = trimmed.match(/^([A-Z_]+)=/);
+      if (match) {
+        const key = match[1];
+        if (updatedKeys.has(key)) {
+          const value = updates[key] || '';
+          const escaped = String(value).includes(' ') ? `"${value}"` : value;
+          newLines.push(`${key}=${escaped}`);
+          updatedKeys.delete(key);
+        } else {
+          newLines.push(line);
+        }
+      } else {
+        newLines.push(line);
+      }
+    });
+
+    // Adiciona chaves que não existiam
+    updatedKeys.forEach(key => {
+      const value = updates[key] || '';
+      const escaped = String(value).includes(' ') ? `"${value}"` : value;
+      newLines.push(`${key}=${escaped}`);
+    });
+
+    const newContent = newLines.join('\n').trim() + '\n';
+    fs.writeFileSync(envPath, newContent, 'utf-8');
+    console.log('[.env] Arquivo atualizado com sucesso');
+    return true;
+  } catch (err) {
+    console.error('[.env] Erro ao atualizar arquivo:', err.message);
+    return false;
+  }
 }
 
 function buildTicketText(payload) {
@@ -602,6 +698,9 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
   const existing = await RestaurantSettings.findOne({ tenantId: LEGACY_TENANT_ID }).lean();
   if (!existing) {
     return res.json({
+      tempoMedio: 15,
+      tempoAlerta: 20,
+      tempoCritico: 25,
       tradeName: '',
       legalName: '',
       cnpj: '',
@@ -610,12 +709,30 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
       number: '',
       city: '',
       complement: '',
+      orderNumberMode: 'continuous',
+      customStartNumber: 100,
+      lastResetDate: null,
+      licenseFileName: null,
+      licenseContent: null,
+      newOrderSound: null,
+      readyOrderSound: null,
+      newOrderSoundEnabled: true,
+      readyOrderSoundEnabled: true,
+      printerName: '',
+      printSize: '80mm',
+      printScale: 115,
+      panelColor: '#FF6B35',
+      animationsEnabled: true,
+      enabledServiceModes: [],
       updatedAt: null,
       updatedBy: null,
     });
   }
 
   return res.json({
+    tempoMedio: existing.tempoMedio ?? 15,
+    tempoAlerta: existing.tempoAlerta ?? 20,
+    tempoCritico: existing.tempoCritico ?? 25,
     tradeName: existing.tradeName || '',
     legalName: existing.legalName || '',
     cnpj: existing.cnpj || '',
@@ -624,6 +741,21 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     number: existing.number || '',
     city: existing.city || '',
     complement: existing.complement || '',
+    orderNumberMode: existing.orderNumberMode || 'continuous',
+    customStartNumber: existing.customStartNumber ?? 100,
+    lastResetDate: existing.lastResetDate || null,
+    licenseFileName: existing.licenseFileName ?? null,
+    licenseContent: existing.licenseContent ?? null,
+    newOrderSound: existing.newOrderSound ?? null,
+    readyOrderSound: existing.readyOrderSound ?? null,
+    newOrderSoundEnabled: existing.newOrderSoundEnabled ?? true,
+    readyOrderSoundEnabled: existing.readyOrderSoundEnabled ?? true,
+    printerName: existing.printerName || '',
+    printSize: existing.printSize || '80mm',
+    printScale: existing.printScale ?? 115,
+    panelColor: existing.panelColor || '#FF6B35',
+    animationsEnabled: existing.animationsEnabled ?? true,
+    enabledServiceModes: existing.enabledServiceModes || [],
     updatedAt: existing.updatedAt || null,
     updatedBy: existing.updatedBy || null,
   });
@@ -649,7 +781,17 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     }
   ).lean();
 
+  // Atualiza .env se printerName foi fornecido
+  if (normalized.printerName) {
+    updateEnvFile({
+      'PRINT_PEDIDO_IMPRESSORA': normalized.printerName,
+    });
+  }
+
   return res.json({
+    tempoMedio: saved.tempoMedio ?? 15,
+    tempoAlerta: saved.tempoAlerta ?? 20,
+    tempoCritico: saved.tempoCritico ?? 25,
     tradeName: saved.tradeName || '',
     legalName: saved.legalName || '',
     cnpj: saved.cnpj || '',
@@ -658,6 +800,21 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     number: saved.number || '',
     city: saved.city || '',
     complement: saved.complement || '',
+    orderNumberMode: saved.orderNumberMode || 'continuous',
+    customStartNumber: saved.customStartNumber ?? 100,
+    lastResetDate: saved.lastResetDate || null,
+    licenseFileName: saved.licenseFileName ?? null,
+    licenseContent: saved.licenseContent ?? null,
+    newOrderSound: saved.newOrderSound ?? null,
+    readyOrderSound: saved.readyOrderSound ?? null,
+    newOrderSoundEnabled: saved.newOrderSoundEnabled ?? true,
+    readyOrderSoundEnabled: saved.readyOrderSoundEnabled ?? true,
+    printerName: saved.printerName || '',
+    printSize: saved.printSize || '80mm',
+    printScale: saved.printScale ?? 115,
+    panelColor: saved.panelColor || '#FF6B35',
+    animationsEnabled: saved.animationsEnabled ?? true,
+    enabledServiceModes: saved.enabledServiceModes || [],
     updatedAt: saved.updatedAt || null,
     updatedBy: saved.updatedBy || null,
   });
@@ -1301,6 +1458,16 @@ app.post('/orders', asyncHandler(async (req, res) => {
   if (!number || !Array.isArray(items)) {
     return res.status(400).json({ error: 'invalid_payload' });
   }
+
+  // Valida se o serviceMode está habilitado
+  if (serviceMode) {
+    const settings = await RestaurantSettings.findOne({ tenantId: LEGACY_TENANT_ID }).lean();
+    const enabledModes = settings?.enabledServiceModes || [];
+    if (enabledModes.length > 0 && !enabledModes.includes(serviceMode)) {
+      return res.status(400).json({ error: 'service_mode_not_enabled', message: `Modalidade "${serviceMode}" não está habilitada` });
+    }
+  }
+
   const id = crypto.randomUUID();
   const now = Date.now();
   const order = {
@@ -1592,6 +1759,15 @@ app.put('/orders/:id', asyncHandler(async (req, res) => {
       ?? req.body?.tipoAtendimento
     )
     : (existing.serviceMode || null);
+
+  if (serviceMode) {
+    const settings = await RestaurantSettings.findOne({ tenantId: LEGACY_TENANT_ID }).lean();
+    const enabledModes = settings?.enabledServiceModes || [];
+    if (enabledModes.length > 0 && !enabledModes.includes(serviceMode)) {
+      return res.status(400).json({ error: 'service_mode_not_enabled', message: `Modalidade "${serviceMode}" não está habilitada` });
+    }
+  }
+
   if (typeof number !== 'number' || !customerName || !Array.isArray(items)) {
     return res.status(400).json({ error: 'invalid_payload' });
   }

@@ -35,6 +35,7 @@ export function AppNav() {
     setTempoCritico,
     orderNumberMode,
     customStartNumber,
+    lastResetDate,
     setOrderNumberMode,
     setCustomStartNumber,
     touchResetDate,
@@ -57,6 +58,8 @@ export function AppNav() {
     setPrintScale,
     enabledServiceModes,
     setEnabledServiceModes,
+    panelColor,
+    setPanelColor,
   } = useSettings();
 
   const getApiBase = () => {
@@ -67,6 +70,9 @@ export function AppNav() {
   };
 
   const saveRestaurantSettings = async (payload: {
+    tempoMedio: number;
+    tempoAlerta: number;
+    tempoCritico: number;
     tradeName: string;
     legalName: string;
     cnpj: string;
@@ -75,6 +81,21 @@ export function AppNav() {
     number: string;
     city: string;
     complement: string;
+    orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
+    customStartNumber: number;
+    lastResetDate: string | null;
+    licenseFileName: string | null;
+    licenseContent: string | null;
+    newOrderSound: string | null;
+    readyOrderSound: string | null;
+    newOrderSoundEnabled: boolean;
+    readyOrderSoundEnabled: boolean;
+    printerName: string;
+    printSize: '58mm' | '80mm' | 'A4';
+    printScale: number;
+    enabledServiceModes: string[];
+    panelColor: string;
+    animationsEnabled: boolean;
   }) => {
     try {
       const token = localStorage.getItem('kds_auth_token') || '';
@@ -144,6 +165,7 @@ export function AppNav() {
           tempoMedio={tempoMedio}
           tempoCritico={tempoCritico}
           tempoAlerta={tempoAlerta}
+          panelColor={panelColor}
           orderNumberMode={orderNumberMode}
           customStartNumber={customStartNumber}
           onSave={(
@@ -169,7 +191,8 @@ export function AppNav() {
             printerName,
             printSize,
             printScale,
-            serviceModes
+            serviceModes,
+            panelColorParam
           ) => {
             setTempoMedio(medio);
             setTempoCritico(critico);
@@ -185,6 +208,9 @@ export function AppNav() {
             setRestaurantCity(restaurantCity);
             setRestaurantComplement(restaurantComplement);
             void saveRestaurantSettings({
+              tempoMedio: medio,
+              tempoAlerta: alerta,
+              tempoCritico: critico,
               tradeName: restaurantTradeName,
               legalName: restaurantLegalName,
               cnpj: restaurantCnpj,
@@ -193,6 +219,23 @@ export function AppNav() {
               number: restaurantNumber,
               city: restaurantCity,
               complement: restaurantComplement,
+              orderNumberMode: orderMode,
+              customStartNumber: startNumber,
+              lastResetDate: (orderMode === 'daily-reset' || orderMode === 'custom-start')
+                ? new Date().toISOString().slice(0, 10)
+                : lastResetDate,
+              licenseFileName,
+              licenseContent,
+              newOrderSound,
+              readyOrderSound,
+              newOrderSoundEnabled: !!newOrderEnabled,
+              readyOrderSoundEnabled: !!readyEnabled,
+              printerName,
+              printSize,
+              printScale,
+              enabledServiceModes: serviceModes,
+              panelColor: panelColorParam,
+              animationsEnabled: true,
             });
             setLicenseFileName(licenseFileName);
             setLicenseContent(licenseContent);
@@ -205,6 +248,7 @@ export function AppNav() {
             setPrintSize(printSize);
             setPrintScale(115);
             setEnabledServiceModes(serviceModes);
+            setPanelColor(panelColorParam);
             // if user enabled daily-reset or custom-start, update last reset date to today so numbering starts immediately
             if (orderMode === 'daily-reset' || orderMode === 'custom-start') touchResetDate();
             setShowConfig(false);

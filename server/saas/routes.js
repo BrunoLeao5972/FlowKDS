@@ -7,6 +7,7 @@ const Order = require('../models/Order');
 const Tenant = require('../models/Tenant');
 const SyncEvent = require('../models/SyncEvent');
 const RefreshToken = require('../models/RefreshToken');
+const themeRoutes = require('./themeRoutes');
 
 const {
   issueAccessToken,
@@ -138,6 +139,11 @@ function createSaasRouter(io) {
   }));
 
   router.use(tenantMiddleware);
+  
+  // ⭐ TEMAS: Registra ANTES da middleware de autenticação global
+  // porque temas são independentes de JWT (resolvem próprio tenantId)
+  router.use('/themes', themeRoutes);
+
   router.use(asyncHandler(async (req, res, next) => {
     const token = parseBearerToken(req);
     if (!token) return res.status(401).json({ error: 'missing_bearer_token' });
