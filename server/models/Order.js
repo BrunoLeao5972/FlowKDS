@@ -31,6 +31,7 @@ const orderSchema = new mongoose.Schema(
       index: true,
     },
     attendant: { type: String, default: null },
+    sellerName: { type: String, default: null },
     observations: { type: String, default: '' },
     status: {
       type: String,

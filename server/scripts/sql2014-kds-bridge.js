@@ -178,12 +178,41 @@ function parseItemFromFlatRow(row) {
 }
 
 function parseAttendantFromRow(row) {
+  // Usa attendantNumber (Atendimento da SQL) para Mesa/Cartão/Apartamento/Serviço
+  const attendantNum = row.attendantnumber ?? row.Atendimento;
+  if (attendantNum !== undefined && attendantNum !== null && attendantNum !== 0) {
+    return String(attendantNum);
+  }
+
+  // Fallback para campos tradicionais de atendente
   const raw = String(
     row.attendant
     ?? row.atendente
     ?? row.garcom
     ?? row.waiter
     ?? row.servidor
+    ?? ''
+  ).trim();
+  return raw || null;
+}
+
+function parseSellerNameFromRow(row) {
+  // Procura por campos com nome do vendedor/garçom
+  const raw = String(
+    row.sellername
+    ?? row.SellerName
+    ?? row.vendedor
+    ?? row.Vendedor
+    ?? row.garcomnome
+    ?? row.GarcomNome
+    ?? row.waitername
+    ?? row.WaiterName
+    ?? row.nomegarcom
+    ?? row.NomeGarcom
+    ?? row.funcionario
+    ?? row.Funcionario
+    ?? row.usuariocadastro
+    ?? row.UsuarioCadastro
     ?? ''
   ).trim();
   return raw || null;
@@ -201,6 +230,14 @@ function parseServiceModeFromRow(row) {
   if (!raw) return null;
 
   const numericModeMap = {
+    '16': 'balcao',       // Balcão
+    '17': 'mesa',         // Mesa
+    '18': 'apartamento',  // Apartamento
+    '20': 'servico',      // Serviço
+    '21': 'cartao',       // Cartão
+    '22': 'delivery',     // Delivery
+    '23': 'encomenda',    // Encomenda
+    // Códigos antigos (compatibilidade)
     '1': 'balcao',
     '2': 'mesa',
     '3': 'cartao',
@@ -250,6 +287,7 @@ function groupRowsToOrders(rows) {
         customerName: row.customername,
         serviceMode: parseServiceModeFromRow(row),
         attendant: parseAttendantFromRow(row),
+        sellerName: parseSellerNameFromRow(row),
         observations: row.observations,
         status: row.status,
         updatedAt,
@@ -266,6 +304,9 @@ function groupRowsToOrders(rows) {
     }
     if (!current.attendant) {
       current.attendant = parseAttendantFromRow(row);
+    }
+    if (!current.sellerName) {
+      current.sellerName = parseSellerNameFromRow(row);
     }
     if (updatedAt > current.updatedAt) {
       current.updatedAt = updatedAt;
@@ -288,6 +329,14 @@ function groupRowsToOrders(rows) {
     const itemsFromJson = parseItems(row.itemsjson);
     if (itemsFromJson.length) {
       current.items.push(...itemsFromJson);
+      continue;
+    }
+
+    // Ignora insumos/subitens (SubItem > 0), mantém apenas itens principais (SubItem = 0 ou null)
+    const subItemValue = row.subitem ?? row.SubItem ?? row.SUBITEM ?? 0;
+    const isInsumo = Number(subItemValue) > 0;
+    if (isInsumo) {
+      console.log(`[sql2014-bridge] ignorando insumo: externalId=${externalId} item=${row.itemname || row.produtodescricao || '?'} subItem=${subItemValue}`);
       continue;
     }
 
@@ -446,15 +495,41 @@ function httpRequestJson(urlString, options = {}) {
   });
 }
 
+// Pedidos que não geram ticket de balcão/cozinha
+function shouldSuppressPrint(serviceMode) {
+  const mode = String(serviceMode || '').trim().toLowerCase();
+  // 17 = Mesa, 21 = Cartão (códigos do Restô/GerencialBrunoInfo)
+  // '2', '3' = códigos legados
+  return mode === 'mesa' || mode === 'cartao' || mode === '2' || mode === '3' || mode === '17' || mode === '21';
+}
+
+// Normaliza nome do cliente - substitui valores genéricos por 'Cliente não identificado'
+function normalizeCustomerName(name) {
+  const normalized = String(name || '').trim().toLowerCase();
+  const genericNames = ['0', 'geral', 'cliente 0', 'cliente geral', 'nao identificado', 'não identificado', 'sem nome'];
+  if (genericNames.includes(normalized) || normalized === '') {
+    return 'Cliente não identificado';
+  }
+  return String(name).trim();
+}
+
 async function createOrderInKds(row, options = {}) {
+  const serviceMode = row.serviceMode || null;
+  const suppressPrint = shouldSuppressPrint(serviceMode);
+  if (suppressPrint) {
+    const modeLabel = serviceMode === '17' || serviceMode === '2' ? 'mesa' : 'cartao';
+    console.log(`[sql2014-bridge] pedido ${modeLabel} detectado: suppressAutoPrint=true`);
+  }
+
   const payload = {
     number: Number(row.number),
-    customerName: String(row.customername || ''),
-    serviceMode: row.serviceMode || null,
+    customerName: normalizeCustomerName(row.customername),
+    serviceMode: serviceMode,
     attendant: row.attendant || null,
+    sellerName: row.sellerName || null,
     observations: String(row.observations || ''),
     items: parseItems(row.itemsjson),
-    suppressAutoPrint: options.suppressAutoPrint === true,
+    suppressAutoPrint: options.suppressAutoPrint === true || suppressPrint,
   };
 
   if (!payload.number || Number.isNaN(payload.number)) {
@@ -505,9 +580,23 @@ async function syncCycle(pool, state, queryText, options = {}) {
   const request = pool.request();
   request.input('lastSyncAt', sql.DateTime2, new Date(state.lastSyncAt));
 
-  const result = await request.query(queryText);
+  console.log(`[sql2014-bridge] executando query com lastSyncAt=${state.lastSyncAt}`);
+  let result;
+  try {
+    result = await request.query(queryText);
+  } catch (sqlError) {
+    console.error('[sql2014-bridge] ERRO SQL:', sqlError.message || sqlError);
+    throw sqlError;
+  }
+
   const rows = Array.isArray(result.recordset) ? result.recordset : [];
+  console.log(`[sql2014-bridge] query retornou ${rows.length} linhas`);
+  if (rows.length > 0) {
+    console.log(`[sql2014-bridge] primeira linha: externalId=${rows[0].externalId} number=${rows[0].number} updatedAt=${rows[0].updatedAt}`);
+  }
+
   const orders = groupRowsToOrders(rows);
+  console.log(`[sql2014-bridge] agrupado em ${orders.length} pedidos`);
 
   if (!orders.length) {
     return { processed: 0, created: 0, updated: 0, skipped: 0, lastSyncAt: state.lastSyncAt };
@@ -541,6 +630,7 @@ async function syncCycle(pool, state, queryText, options = {}) {
         customername: row.customerName,
         serviceMode: row.serviceMode,
         attendant: row.attendant,
+        sellerName: row.sellerName,
         observations: row.observations,
         itemsjson: row.items,
         externalid: externalId,

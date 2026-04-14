@@ -7,7 +7,8 @@ SELECT
   CAST(p.DataAtualizacao AS DATETIME2) AS updatedAt,
   ISNULL(i.NomeItem, 'Item') AS itemName,
   CAST(CASE WHEN i.Quantidade IS NULL OR i.Quantidade <= 0 THEN 1 ELSE i.Quantidade END AS INT) AS itemQuantity,
-  ISNULL(i.Observacao, '') AS itemNotes
+  ISNULL(i.Observacao, '') AS itemNotes,
+  CAST(0 AS INT) AS subItem  -- Se sua tabela tem subitens/insumos, use: CAST(i.SubItem AS INT)
 FROM dbo.Pedidos p
 LEFT JOIN dbo.ItensPedido i ON i.IdPedido = p.IdPedido
 LEFT JOIN dbo.Clientes c ON c.IdCliente = p.IdCliente

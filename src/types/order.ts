@@ -6,6 +6,7 @@ export interface Sector {
   id: string;
   name: string;
   sortOrder: number;
+  isActive?: boolean;
 }
 
 export interface OrderItem {
@@ -24,6 +25,7 @@ export interface Order {
   serviceMode?: ServiceMode | null;
   cookId?: string | null;
   attendant?: string | null;
+  sellerName?: string | null;
   items: OrderItem[];
   observations: string;
   status: OrderStatus;

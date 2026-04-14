@@ -865,10 +865,16 @@ app.delete('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
 
 // ── Setores ─────────────────────────────────────────────────────────────────
 
-// Retorna todos os setores sincronizados do SQL.
+// Retorna todos os setores sincronizados do SQL (apenas ativos por padrão).
+// Query param ?includeInactive=true retorna todos.
 app.get('/sectors', authMiddleware, asyncHandler(async (req, res) => {
-  const sectors = await Sector.find({ tenantId: LEGACY_TENANT_ID }).sort({ sortOrder: 1, sectorId: 1 }).lean();
-  res.json(sectors.map(s => ({ id: s.sectorId, name: s.name, sortOrder: s.sortOrder })));
+  const includeInactive = req.query.includeInactive === 'true';
+  const filter = { tenantId: LEGACY_TENANT_ID };
+  if (!includeInactive) {
+    filter.isActive = true;
+  }
+  const sectors = await Sector.find(filter).sort({ sortOrder: 1, sectorId: 1 }).lean();
+  res.json(sectors.map(s => ({ id: s.sectorId, name: s.name, sortOrder: s.sortOrder, isActive: s.isActive })));
 }));
 
 // Recebe a lista de setores enviada pelo bridge e faz upsert em massa.
@@ -880,12 +886,37 @@ app.post('/sectors/sync', authMiddleware, asyncHandler(async (req, res) => {
     updateOne: {
       filter: { tenantId: LEGACY_TENANT_ID, sectorId: String(s.id) },
       update: { $set: { name: String(s.name || s.id), sortOrder: idx } },
+      // Não sobrescreve isActive para não reativar setores desativados manualmente
       upsert: true,
     },
   }));
 
   if (ops.length) await Sector.bulkWrite(ops, { ordered: false });
   res.json({ synced: ops.length });
+}));
+
+// Ativa ou desativa um setor no KDS (sem excluir do SQL). Apenas admins.
+app.patch('/sectors/:sectorId/activation', authMiddleware, asyncHandler(async (req, res) => {
+  const { sectorId } = req.params;
+  const { isActive } = req.body || {};
+
+  // Verifica se é admin
+  const authPermissions = req.authUser?.permissions || [];
+  if (!authPermissions.includes('admin')) {
+    return res.status(403).json({ error: 'admin_required' });
+  }
+
+  if (typeof isActive !== 'boolean') {
+    return res.status(400).json({ error: 'isActive_must_be_boolean' });
+  }
+
+  const sector = await Sector.findOneAndUpdate(
+    { tenantId: LEGACY_TENANT_ID, sectorId: String(sectorId) },
+    { $set: { isActive } },
+    { new: true, lean: true }
+  );
+  if (!sector) return res.status(404).json({ error: 'sector_not_found' });
+  res.json({ id: sector.sectorId, name: sector.name, isActive: sector.isActive });
 }));
 
 // ── Pedidos ──────────────────────────────────────────────────────────────────
@@ -1445,7 +1476,7 @@ if (fs.existsSync(DIST)) {
 }
 
 app.post('/orders', asyncHandler(async (req, res) => {
-  const { number, customerName, items, observations, cookId, suppressAutoPrint } = req.body;
+  const { number, customerName, items, observations, cookId, suppressAutoPrint, sellerName } = req.body;
   const attendant = String(req.body?.attendant || req.body?.waiter || req.body?.garcom || req.body?.atendente || '').trim() || null;
   const serviceMode = normalizeServiceMode(
     req.body?.serviceMode
@@ -1477,6 +1508,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
     customerName: customerName || '',
     serviceMode,
     attendant,
+    sellerName: sellerName || null,
     observations: observations || '',
     status: 'received',
     createdAt: now,

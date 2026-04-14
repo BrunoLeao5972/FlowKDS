@@ -49,9 +49,10 @@ const normalizeServiceMode = (value: unknown): ServiceMode | null => {
   return aliases[normalized] || null;
 };
 
-// Pedidos de mesa não geram ticket de balcão/cozinha.
+// Pedidos de mesa e cartão não geram ticket de balcão/cozinha.
 const shouldPrintTicket = (order: Pick<Order, 'serviceMode'>): boolean => {
-  return normalizeServiceMode(order.serviceMode) !== 'mesa';
+  const mode = normalizeServiceMode(order.serviceMode);
+  return mode !== 'mesa' && mode !== 'cartao';
 };
 
 export function OrderProvider({ children }: { children: React.ReactNode }) {
@@ -146,7 +147,12 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       .items { margin-top: 10px; border-top: 1px dashed #bbb; padding-top: 8px; }
       .footer { margin-top: 12px; border-top: 1px dashed #bbb; padding-top: 8px; text-align: center; font-size: 12px; color: #222; }
       .hint { margin-top: 10px; font-size: 12px; color: #666; }
-      @media print { body { padding: 0; } .ticket { border: none; width: auto; } .hint { display: none; } }
+      @media print {
+        body { padding: 0; margin: 0; }
+        .ticket { border: none; width: auto; padding: 8px 12px 20px 12px; }
+        .footer { padding-bottom: 12px; page-break-inside: avoid; }
+        .hint { display: none; }
+      }
     </style>
   </head>
   <body>

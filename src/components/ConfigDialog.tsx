@@ -88,6 +88,7 @@ interface SectorData {
   id: string;
   name: string;
   sortOrder?: number;
+  isActive?: boolean;
 }
 
 /**
@@ -164,6 +165,8 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [showUsersPanel, setShowUsersPanel] = useState(false);
   const [showPermissionsPanel, setShowPermissionsPanel] = useState(false);
   const [showServiceModesPanel, setShowServiceModesPanel] = useState(false);
+  // Sub-aba dentro do painel de Modalidades: 'modes' | 'sectors'
+  const [modesSubTab, setModesSubTab] = useState<'modes' | 'sectors'>('modes');
   const [showReportsPanel, setShowReportsPanel] = useState(false);
   const [showSupportPanel, setShowSupportPanel] = useState(false);
   const [showThemePanel, setShowThemePanel] = useState(false);
@@ -234,6 +237,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   // Lista de usuários carregada da API e paginação dos painéis de Usuários e Permissões
   const [users, setUsers] = useState<UserData[]>([]);
   const [sectors, setSectors] = useState<SectorData[]>([]);
+  const [updatingSectorId, setUpdatingSectorId] = useState<string | null>(null);
   const [currentUsersPage, setCurrentUsersPage] = useState(1);
   const [currentPermsPage, setCurrentPermsPage] = useState(1);
 
@@ -331,6 +335,13 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     }
   }, [showUsersPanel, showPermissionsPanel]);
 
+  // Dispara o carregamento de setores ao abrir o painel de Modalidades ou quando muda para aba de setores
+  useEffect(() => {
+    if (showServiceModesPanel) {
+      loadSectors(true);
+    }
+  }, [showServiceModesPanel, modesSubTab]);
+
   // Dispara o carregamento de relatórios ao abrir o painel de Relatórios
   useEffect(() => {
     if (showReportsPanel) {
@@ -365,9 +376,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     }
   };
 
-  const loadSectors = async () => {
+  const loadSectors = async (includeInactive = false) => {
     try {
-      const response = await fetch(`${getApiBase()}/sectors`, {
+      const queryParam = includeInactive ? '?includeInactive=true' : '';
+      const response = await fetch(`${getApiBase()}/sectors${queryParam}`, {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('kds_auth_token') || ''}` }
       });
@@ -377,6 +389,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
         id: String(s.id),
         name: String(s.name || s.id),
         sortOrder: Number(s.sortOrder || 0),
+        isActive: s.isActive !== false, // default true
       }));
       setSectors(normalized);
     } catch (error) {
@@ -770,6 +783,33 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     setNewUserSectorIds(prev => prev.filter(id => id !== sectorId));
   };
 
+  const handleToggleSectorActivation = async (sectorId: string, isActive: boolean) => {
+    setUpdatingSectorId(sectorId);
+    try {
+      const response = await fetch(`${getApiBase()}/sectors/${sectorId}/activation`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('kds_auth_token') || ''}`
+        },
+        body: JSON.stringify({ isActive })
+      });
+      if (!response.ok) throw new Error('Failed to update sector');
+      // Atualiza o estado local imediatamente para feedback visual instantâneo
+      setSectors(prev => prev.map(s => 
+        s.id === sectorId ? { ...s, isActive } : s
+      ));
+      // Recarrega do servidor para garantir sincronização
+      await loadSectors(true);
+    } catch (error) {
+      console.error('Error updating sector activation:', error);
+      // Reverte em caso de erro
+      await loadSectors(true);
+    } finally {
+      setUpdatingSectorId(null);
+    }
+  };
+
   const startEditUser = (user: UserData) => {
     setEditingUserId(user._id);
     setEditUsername(user.username);
@@ -1014,7 +1054,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       else if (item.panel === 'reports') setShowReportsPanel(true);
                       else if (item.panel === 'theme') setShowThemePanel(true);
                       else if (item.panel === 'support') setShowSupportPanel(true);
-                      else setActiveTab(item.id);
+                      else setActiveTab(item.id as 'restaurant' | 'users');
                     }}
                     className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
                       isActive
@@ -1134,7 +1174,20 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
               </div>
 
               <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
-                <p className="text-sm font-medium">Timer e Impressao</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Timer e Impressao</p>
+                  <button
+                    onClick={() => settings.setAnimationsEnabled(!settings.animationsEnabled)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                      settings.animationsEnabled
+                        ? 'bg-green-100 text-green-700 hover:bg-green-200 border border-green-200'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
+                    }`}
+                    title={settings.animationsEnabled ? 'Desativar piscar nos cards atrasados' : 'Ativar piscar nos cards atrasados'}
+                  >
+                    {settings.animationsEnabled ? '🔔 Piscar Ativo' : '🔕 Piscar Desligado'}
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block mb-1.5 text-sm font-medium">Tempo médio (min):</label>
@@ -1318,60 +1371,162 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
             </div>
           )}
 
-          {/* TAB: MODALIDADES */}
+          {/* TAB: MODALIDADES (com sub-abas para Modalidades e Setores) */}
           {showServiceModesPanel && (
             <div className="space-y-3">
-              <h3 className="font-semibold text-base">Modalidades no KDS</h3>
-              <p className="text-sm text-muted-foreground">Selecione quais modalidades do caixa podem entrar no fluxo do KDS.</p>
-
-              <div className="rounded-md border border-border bg-background p-3 space-y-2">
-                <p className="text-xs font-medium">Modalidades habilitadas para atendimento:</p>
-
-                <div className="flex gap-2">
-                  <select
-                    className="input h-8 text-xs flex-1"
-                    value={serviceModeToAdd}
-                    onChange={e => setServiceModeToAdd(e.target.value)}
-                  >
-                    <option value="">Selecione uma modalidade...</option>
-                    {SERVICE_MODE_OPTIONS
-                      .filter(mode => !selectedServiceModes.includes(mode.id))
-                      .map(mode => (
-                        <option key={mode.id} value={mode.id}>{mode.label}</option>
-                      ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddServiceMode}
-                    disabled={!serviceModeToAdd}
-                    className="h-8 px-2 rounded-md border border-orange-300 text-orange-700 text-xs font-semibold disabled:opacity-50"
-                  >
-                    Adicionar
-                  </button>
-                </div>
-
-                <div className="min-h-8 flex flex-wrap gap-1">
-                  {selectedServiceModes.length === 0 ? (
-                    <span className="text-[11px] text-muted-foreground">Nenhuma modalidade habilitada.</span>
-                  ) : (
-                    selectedServiceModes.map(mode => (
-                      <span key={mode} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-xs font-medium">
-                        {getServiceModeLabel(mode)}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveServiceMode(mode)}
-                          className="text-orange-700 hover:text-orange-900"
-                          title="Remover modalidade"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))
-                  )}
-                </div>
+              {/* Sub-abas de navegação */}
+              <div className="flex items-center gap-2 border-b border-border pb-2">
+                <button
+                  onClick={() => setModesSubTab('modes')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    modesSubTab === 'modes'
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-muted text-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  📦 Modalidades
+                </button>
+                <button
+                  onClick={() => setModesSubTab('sectors')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    modesSubTab === 'sectors'
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-muted text-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  🏭 Setores
+                </button>
               </div>
 
-              <p className="text-[11px] text-muted-foreground">Use este filtro para aceitar no KDS apenas pedidos das modalidades selecionadas.</p>
+              {/* Conteúdo da sub-aba Modalidades */}
+              {modesSubTab === 'modes' && (
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="font-semibold text-base">Modalidades no KDS</h3>
+                    <p className="text-sm text-muted-foreground">Selecione quais modalidades do caixa podem entrar no fluxo do KDS.</p>
+                  </div>
+
+                  <div className="rounded-md border border-border bg-background p-3 space-y-2">
+                    <p className="text-xs font-medium">Modalidades habilitadas para atendimento:</p>
+
+                    <div className="flex gap-2">
+                      <select
+                        className="input h-8 text-xs flex-1"
+                        value={serviceModeToAdd}
+                        onChange={e => setServiceModeToAdd(e.target.value)}
+                      >
+                        <option value="">Selecione uma modalidade...</option>
+                        {SERVICE_MODE_OPTIONS
+                          .filter(mode => !selectedServiceModes.includes(mode.id))
+                          .map(mode => (
+                            <option key={mode.id} value={mode.id}>{mode.label}</option>
+                          ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleAddServiceMode}
+                        disabled={!serviceModeToAdd}
+                        className="h-8 px-2 rounded-md border border-orange-300 text-orange-700 text-xs font-semibold disabled:opacity-50"
+                      >
+                        Adicionar
+                      </button>
+                    </div>
+
+                    <div className="min-h-8 flex flex-wrap gap-1">
+                      {selectedServiceModes.length === 0 ? (
+                        <span className="text-[11px] text-muted-foreground">Nenhuma modalidade habilitada.</span>
+                      ) : (
+                        selectedServiceModes.map(mode => (
+                          <span key={mode} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-xs font-medium">
+                            {getServiceModeLabel(mode)}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveServiceMode(mode)}
+                              className="text-orange-700 hover:text-orange-900"
+                              title="Remover modalidade"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground">Use este filtro para aceitar no KDS apenas pedidos das modalidades selecionadas.</p>
+                </div>
+              )}
+
+              {/* Conteúdo da sub-aba Setores */}
+              {modesSubTab === 'sectors' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-base">Gerenciar Setores</h3>
+                      <p className="text-sm text-muted-foreground">Ative ou desative setores para controlar quais aparecem na cozinha.</p>
+                    </div>
+                    <button
+                      onClick={() => loadSectors(true)}
+                      className="h-8 px-3 rounded-md border border-orange-300 text-orange-700 text-xs font-semibold hover:bg-orange-50"
+                    >
+                      🔄 Atualizar
+                    </button>
+                  </div>
+
+                  <div className="rounded-md border border-border bg-background p-3">
+                    <p className="text-xs font-medium mb-2">Setores sincronizados do SQL:</p>
+
+                    {sectors.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Nenhum setor encontrado. Sincronize com o SQL Server.</p>
+                    ) : (
+                      <div className="space-y-1 max-h-80 overflow-y-auto">
+                        {sectors
+                          .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+                          .map(sector => (
+                            <div
+                              key={sector.id}
+                              className={`flex items-center justify-between px-3 py-2 rounded-md border ${
+                                sector.isActive !== false
+                                  ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
+                                  : 'bg-gray-50 border-gray-200 dark:bg-gray-900/30 dark:border-gray-700 opacity-60'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs font-mono text-muted-foreground w-8">#{sector.id}</span>
+                                <span className="text-sm font-medium">{sector.name}</span>
+                                {sector.isActive === false && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600 font-medium">
+                                    Inativo
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleToggleSectorActivation(sector.id, sector.isActive === false)}
+                                disabled={updatingSectorId === sector.id}
+                                className={`h-7 px-3 rounded-md text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  sector.isActive !== false
+                                    ? 'bg-red-100 text-red-700 hover:bg-red-200 border border-red-200'
+                                    : 'bg-green-100 text-green-700 hover:bg-green-200 border border-green-200'
+                                }`}
+                              >
+                                {updatingSectorId === sector.id 
+                                  ? '⏳' 
+                                  : (sector.isActive !== false ? 'Desativar' : 'Ativar')
+                                }
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground">
+                    Setores desativados não aparecem nas abas da cozinha, mas continuam existindo no SQL.
+                    <br />
+                    Os pedidos com itens de setores inativos ainda serão exibidos na aba "Comanda Completa".
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

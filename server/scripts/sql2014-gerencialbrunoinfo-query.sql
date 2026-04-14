@@ -16,6 +16,9 @@ SELECT
   COALESCE(l.Memorando, '') AS observations,
   CAST(l.Status AS VARCHAR(20)) AS status,
   CAST(pp.Status AS VARCHAR(20)) AS itemStatus,
+  CAST(l.Tipo AS VARCHAR(10)) AS serviceMode,
+  CAST(l.Atendimento AS INT) AS attendantNumber,
+  NULLIF(LTRIM(RTRIM(f.Nome)), '') AS sellerName,
   CAST(
     CASE
       WHEN COALESCE(l.Edicao, l.Inclusao, l.Movimento, l.Emissao) > COALESCE(pp.Edicao, pp.Inclusao, '1900-01-01')
@@ -26,10 +29,13 @@ SELECT
   COALESCE(NULLIF(vp.ProdutoApelido, ''), NULLIF(vp.ProdutoNome, ''), NULLIF(pp.ProdutoDescricao, ''), CONCAT('Produto ', CAST(pp.ProdutoID AS VARCHAR(30)))) AS itemName,
   CAST(CASE WHEN pp.QDE IS NULL OR pp.QDE <= 0 THEN 1 ELSE pp.QDE END AS INT) AS itemQuantity,
   COALESCE(pp.Observacoes, '') AS itemNotes,
-  COALESCE(CAST(pp.SetorID AS VARCHAR(20)), '') AS sectorId
+  COALESCE(CAST(pp.SetorID AS VARCHAR(20)), '') AS sectorId,
+  CAST(pp.SubItem AS INT) AS subItem
 FROM vwLancamentos l
 INNER JOIN vwPedidosProdutos pp ON pp.LancamentoID = l.LancamentoID
+LEFT JOIN Pedidos p ON p.Código = l.LancamentoID
 LEFT JOIN Clientes c ON c.[Código] = l.ClienteID
+LEFT JOIN Fornecedores f ON f.[Código] = p.Vendedor
 LEFT JOIN vwProdutos vp ON vp.ProdutoID = pp.ProdutoID
 WHERE (
   COALESCE(pp.Edicao, pp.Inclusao) > @lastSyncAt

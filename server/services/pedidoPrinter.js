@@ -327,7 +327,7 @@ $ticket = $payloadJson | ConvertFrom-Json
 $doc = New-Object System.Drawing.Printing.PrintDocument
 $doc.DocumentName = 'SenhaPedido'
 $doc.PrinterSettings.PrinterName = $printerName
-$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(5, 5, 5, 5)
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(10, 10, 3, 40)
 if (-not $doc.PrinterSettings.IsValid) { throw 'Impressora invalida ou indisponivel.' }
 $doc.add_PrintPage({
   param($sender, $e)
@@ -527,8 +527,12 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
     .items-title { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin: 8px 0 4px; }
     .item { font-size: 13px; margin: 3px 0; }
     .obs { color: #888; font-size: 11px; }
-    .footer { margin-top: 12px; text-align: center; font-size: 12px; color: #222; }
-    @media print { body { background: none; padding: 0; } .ticket { border: none; width: auto; } }
+    .footer { margin-top: 12px; text-align: center; font-size: 12px; color: #222; padding-bottom: 8px; }
+    @media print {
+      body { background: none; padding: 0; margin: 0; }
+      .ticket { border: none; width: auto; padding: 8px 12px 20px 12px; }
+      .footer { padding-bottom: 12px; page-break-inside: avoid; }
+    }
   </style>
 </head>
 <body>

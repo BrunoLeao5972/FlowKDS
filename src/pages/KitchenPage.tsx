@@ -4,10 +4,28 @@ import { Order, OrderItem, ItemStatus, STATUS_LABELS } from '@/types/order';
 import { useAuth } from '@/contexts/AuthContext';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, AlertTriangle, Clock, ChefHat, Layers } from 'lucide-react';
+import {
+  CheckCircle2, AlertTriangle, Clock, ChefHat, Layers,
+  Store, Armchair, CreditCard, Bike, Package, Briefcase, Building, MapPin
+} from 'lucide-react';
+import type { ServiceMode } from '@/types/order';
 
 function getElapsedMinutes(date: Date) {
   return Math.floor((Date.now() - date.getTime()) / 60000);
+}
+
+/** Retorna ícone e label para o tipo de atendimento (modalidade) */
+function getServiceModeConfig(mode?: ServiceMode | null) {
+  const configs: Record<ServiceMode, { icon: React.ElementType; label: string; color: string }> = {
+    balcao: { icon: Store, label: 'Balcão', color: 'text-blue-500' },
+    mesa: { icon: Armchair, label: 'Mesa', color: 'text-purple-500' },
+    cartao: { icon: CreditCard, label: 'Cartão', color: 'text-green-500' },
+    delivery: { icon: Bike, label: 'Delivery', color: 'text-orange-500' },
+    encomenda: { icon: Package, label: 'Encomenda', color: 'text-pink-500' },
+    servico: { icon: Briefcase, label: 'Serviço', color: 'text-cyan-500' },
+    apartamento: { icon: Building, label: 'Apartamento', color: 'text-indigo-500' },
+  };
+  return mode && configs[mode] ? configs[mode] : null;
 }
 
 function formatItemNote(raw?: string) {
@@ -286,7 +304,23 @@ export default function KitchenPage() {
               >
                 {/* Header */}
                 <div className="flex items-center justify-between">
-                  <span className="text-3xl font-black">{order.number}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-3xl font-black">{order.number}</span>
+                    {(() => {
+                      const modeConfig = getServiceModeConfig(order.serviceMode);
+                      if (!modeConfig) return null;
+                      const ModeIcon = modeConfig.icon;
+                      return (
+                        <div
+                          className={`flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border ${modeConfig.color}`}
+                          title={modeConfig.label}
+                        >
+                          <ModeIcon className="w-4 h-4" />
+                          <span className="text-xs font-semibold hidden sm:inline">{modeConfig.label}</span>
+                        </div>
+                      );
+                    })()}
+                  </div>
                   <Timer startTime={order.createdAt} colorClass={getTimerColor(minutes)} />
                 </div>
 
@@ -308,8 +342,21 @@ export default function KitchenPage() {
                   <p className="text-sm text-muted-foreground -mt-2">Cozinheiro: {order.cookId}</p>
                 )}
 
-                {order.serviceMode === 'mesa' && order.attendant && (
-                  <p className="text-sm text-blue-600 dark:text-blue-400 font-semibold -mt-2">Atendente: {order.attendant}</p>
+                {order.attendant && order.serviceMode && (
+                  <p className={`text-sm font-semibold -mt-2 ${
+                    order.serviceMode === 'mesa' ? 'text-blue-600 dark:text-blue-400'
+                    : order.serviceMode === 'cartao' ? 'text-green-600 dark:text-green-400'
+                    : order.serviceMode === 'apartamento' ? 'text-indigo-600 dark:text-indigo-400'
+                    : order.serviceMode === 'servico' ? 'text-cyan-600 dark:text-cyan-400'
+                    : 'text-muted-foreground'
+                  }`}>
+                    {/* Para Mesa, Cartão e Apartamento: mostra nome do vendedor se disponível, senão o número */}
+                    {order.serviceMode === 'mesa' && (order.sellerName || `Mesa ${order.attendant}`)}
+                    {order.serviceMode === 'cartao' && (order.sellerName || `Cartão ${order.attendant}`)}
+                    {order.serviceMode === 'apartamento' && (order.sellerName || `Apto ${order.attendant}`)}
+                    {order.serviceMode === 'servico' && `Serviço ${order.attendant}`}
+                    {(order.serviceMode === 'balcao' || order.serviceMode === 'delivery' || order.serviceMode === 'encomenda') && `Atendente: ${order.attendant}`}
+                  </p>
                 )}
 
                 {/* Itens (filtrados pelo setor ativo) */}

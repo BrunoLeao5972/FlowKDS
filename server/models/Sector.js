@@ -13,6 +13,8 @@ const sectorSchema = new mongoose.Schema(
     name: { type: String, required: true },
     /** Ordem de exibição (posição retornada pelo SQL). */
     sortOrder: { type: Number, default: 0 },
+    /** Indica se o setor está ativo no KDS (pode ser desativado sem excluir do SQL). */
+    isActive: { type: Boolean, default: true },
   },
   {
     versionKey: false,
