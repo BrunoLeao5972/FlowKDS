@@ -33,9 +33,9 @@ SELECT
   CAST(pp.SubItem AS INT) AS subItem
 FROM vwLancamentos l
 INNER JOIN vwPedidosProdutos pp ON pp.LancamentoID = l.LancamentoID
-LEFT JOIN Pedidos p ON p.Código = l.LancamentoID
+LEFT JOIN PEDIDOS p ON p.[Lançamento] = l.LancamentoID
 LEFT JOIN Clientes c ON c.[Código] = l.ClienteID
-LEFT JOIN Fornecedores f ON f.[Código] = p.Vendedor
+LEFT JOIN Fornecedores f ON f.[Código] = p.[Vendedor]
 LEFT JOIN vwProdutos vp ON vp.ProdutoID = pp.ProdutoID
 WHERE (
   COALESCE(pp.Edicao, pp.Inclusao) > @lastSyncAt

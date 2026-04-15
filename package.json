@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "10.4.26",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,7 +18,10 @@
     "start:server": "node server/index.js",
     "start:bridge": "node server/scripts/sql2014-kds-bridge.js",
     "release:protected": "powershell -ExecutionPolicy Bypass -File ./scripts/build-protected-release.ps1",
-    "release:protected:node18": "powershell -ExecutionPolicy Bypass -File ./scripts/build-protected-release.ps1 -Target node18-win-x64"
+    "release:protected:node18": "powershell -ExecutionPolicy Bypass -File ./scripts/build-protected-release.ps1 -Target node18-win-x64",
+    "version:patch": "npm version patch && node scripts/update-version.js",
+    "version:minor": "npm version minor && node scripts/update-version.js",
+    "version:major": "npm version major && node scripts/update-version.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

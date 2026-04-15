@@ -122,7 +122,14 @@ export function AppNav() {
     <>
       <nav className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="flex items-center gap-1 px-4 h-14">
-          <span className="font-black text-lg text-primary mr-4">🔥Flow KDS</span>
+          <div className="flex items-center gap-2 mr-4">
+            <img 
+              src="/FOX KDS.png" 
+              alt="FOX KDS" 
+              className="h-8 w-auto object-contain"
+            />
+            <span className="font-black text-lg text-primary">FOX KDS</span>
+          </div>
           {links.filter(link => hasPermission(link.permission)).map(link => (
             <Link
               key={link.to}

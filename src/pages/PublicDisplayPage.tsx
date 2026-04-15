@@ -42,21 +42,25 @@ function OrderCard({ order, variant }: OrderCardProps) {
         }
       `}
     >
-      <span
-        className="text-3xl md:text-4xl font-black block"
-        style={{ color: variant === 'preparing' ? 'var(--color-primary)' : 'var(--color-success)' }}
-      >
-        {order.number}
-      </span>
-      {getDisplayCustomerName(order.customerName) && (
-        <p className="text-sm mt-1 tema-text-secondary">
-          {getDisplayCustomerName(order.customerName)}
-        </p>
-      )}
-      {variant === 'ready' && (
-        <p className="text-sm font-semibold mt-1 tema-success">
-          RETIRE NO BALCÃO
-        </p>
+      {getDisplayCustomerName(order.customerName) ? (
+        <>
+          <span
+            className="text-4xl md:text-5xl font-black block"
+            style={{ color: variant === 'preparing' ? 'var(--color-primary)' : 'var(--color-success)' }}
+          >
+            {order.number}
+          </span>
+          <p className="text-base md:text-lg mt-1 tema-text-secondary font-medium">
+            {getDisplayCustomerName(order.customerName)}
+          </p>
+        </>
+      ) : (
+        <span
+          className="text-[2.5rem] md:text-[3.2rem] font-black block py-1"
+          style={{ color: variant === 'preparing' ? 'var(--color-primary)' : 'var(--color-success)' }}
+        >
+          {order.number}
+        </span>
       )}
     </motion.div>
   );
@@ -105,12 +109,15 @@ function PublicDisplayContent() {
     return () => window.clearTimeout(timeout);
   }, [showModeFeedback]);
 
+  // Filtra pedidos que devem aparecer no painel (exclui mesa e cartão)
+  const isDisplayMode = (mode?: string) => mode !== 'mesa' && mode !== 'cartao';
+
   const preparingOrders = orders
-    .filter(o => o.status === 'preparing' && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
+    .filter(o => o.status === 'preparing' && isDisplayMode(o.serviceMode) && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
   const readyOrders = orders
-    .filter(o => o.status === 'ready' && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
+    .filter(o => o.status === 'ready' && isDisplayMode(o.serviceMode) && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => (b.readyAt?.getTime() || 0) - (a.readyAt?.getTime() || 0));
 
   return (

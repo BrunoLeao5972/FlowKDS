@@ -69,8 +69,16 @@ export default function LoginPage() {
       
       {/* Conteúdo do formulário */}
       <section className="w-full max-w-md bg-card border border-border rounded-xl shadow-lg p-6 relative z-20">
-        <h1 className="text-2xl font-bold text-foreground">Entrar no KDS</h1>
-        <p className="text-sm text-muted-foreground mt-1">Use as credenciais do cliente para acessar o painel.</p>
+        {/* Logo FOX KDS */}
+        <div className="flex justify-center mb-4">
+          <img 
+            src="/FOX KDS.png" 
+            alt="FOX KDS" 
+            className="h-20 w-auto object-contain"
+          />
+        </div>
+        <h1 className="text-2xl font-bold text-foreground text-center">Entrar no FOX KDS</h1>
+        <p className="text-sm text-muted-foreground mt-1 text-center">Use as credenciais do cliente para acessar o painel.</p>
 
         <form className="mt-6 space-y-4" onSubmit={onSubmit}>
           <div>

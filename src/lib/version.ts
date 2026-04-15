@@ -1,2 +1,2 @@
-/** Versão atual do Flow KDS. Atualizar antes de cada release. */
-export const APP_VERSION = '10.04.26';
+/** Versão atual do FOX KDS - SemVer: MAJOR.MINOR.PATCH */
+export const APP_VERSION = '2.0.0';

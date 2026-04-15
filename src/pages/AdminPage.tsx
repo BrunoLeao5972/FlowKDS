@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { getDisplayCustomerName } from '@/lib/customerName';
 
 const statusConfig: Record<OrderStatus, { icon: React.ElementType; colorClass: string }> = {
   received: { icon: Package, colorClass: 'bg-status-received' },
@@ -102,6 +101,12 @@ function ItemStatusIcon({ status }: { status: ItemStatus }) {
   if (status === 'ready') return <CheckCircle2 className="w-3.5 h-3.5 text-status-ready" />;
   if (status === 'preparing') return <ChefHat className="w-3.5 h-3.5 text-status-preparing" />;
   return <Clock className="w-3.5 h-3.5 text-muted-foreground" />;
+}
+
+// Para Admin: mostra 'Cliente não identificado' quando não houver cliente
+function getAdminCustomerName(customerName?: string): string {
+  const name = String(customerName || '').trim();
+  return name || 'Cliente não identificado';
 }
 
 export default function AdminPage() {
@@ -314,9 +319,7 @@ export default function AdminPage() {
                             {STATUS_LABELS[order.status]}
                           </span>
                         </div>
-                        {getDisplayCustomerName(order.customerName) && (
-                          <p className="text-sm text-muted-foreground">{getDisplayCustomerName(order.customerName)}</p>
-                        )}
+                        <p className="text-sm text-muted-foreground">{getAdminCustomerName(order.customerName)}</p>
                       </div>
                       <div className="text-sm text-muted-foreground">{formatTime(order.createdAt)}</div>
                     </div>
@@ -425,7 +428,7 @@ export default function AdminPage() {
                         className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
                       >
                         <td className="p-4 font-bold text-lg">{order.number}</td>
-                        <td className="p-4">{getDisplayCustomerName(order.customerName)}</td>
+                        <td className="p-4">{getAdminCustomerName(order.customerName)}</td>
                         <td className="p-4 hidden md:table-cell">
                           <div className="flex flex-col gap-1">
                             {order.items.map(item => {

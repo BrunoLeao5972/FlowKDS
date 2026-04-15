@@ -105,15 +105,12 @@ function montarPayloadRaw(conteudo, nomeImpressora) {
 
   const escInit = Buffer.from([0x1b, 0x40]);
   const escAlignLeft = Buffer.from([0x1b, 0x61, 0x00]);
-  const feed = Buffer.from([0x0a, 0x0a]);
+  // Feed padrão antes do corte
+  const feed = Buffer.from([0x0a, 0x0a, 0x0a]);
+  // Corte parcial padrão ESC/POS
   const cutParcial = Buffer.from([0x1d, 0x56, 0x41, 0x10]);
 
-  if (printer.includes('daruma')) {
-    // Daruma costuma aceitar corte parcial via ESC/POS.
-    return Buffer.concat([escInit, escAlignLeft, textoBytes, feed, cutParcial]);
-  }
-
-  return Buffer.concat([escInit, escAlignLeft, textoBytes]);
+  return Buffer.concat([escInit, escAlignLeft, textoBytes, feed, cutParcial]);
 }
 
 function obterPastaSaida(customOutputDir) {
@@ -327,7 +324,8 @@ $ticket = $payloadJson | ConvertFrom-Json
 $doc = New-Object System.Drawing.Printing.PrintDocument
 $doc.DocumentName = 'SenhaPedido'
 $doc.PrinterSettings.PrinterName = $printerName
-$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(10, 10, 3, 40)
+// Margens padrão para compatibilidade com diversas impressoras térmicas
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(10, 10, 5, 40)
 if (-not $doc.PrinterSettings.IsValid) { throw 'Impressora invalida ou indisponivel.' }
 $doc.add_PrintPage({
   param($sender, $e)
@@ -390,6 +388,10 @@ $doc.add_PrintPage({
   $e.Graphics.DrawLine([System.Drawing.Pens]::Black, $x, $y, $x + $width, $y)
   $y += (4 * $scale)
   [void](Draw-CenteredText 'solucaosistemas.net' $fontFooter $y)
+  $y += (6 * $scale)
+  [void](Draw-CenteredText '_______________________________________________' $fontFooter $y)
+  $y += (6 * $scale)
+  [void](Draw-CenteredText '_______________________________________________' $fontFooter $y)
   $e.HasMorePages = $false
 })
 $doc.Print()
@@ -517,7 +519,7 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
   <style>
     * { box-sizing: border-box; }
     body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
-    .ticket { background: #fff; border: 1px dashed #555; border-radius: 4px; padding: 16px; width: 320px; }
+    .ticket { background: #fff; border: 1px dashed #555; border-radius: 4px; padding: 24px 16px 32px 16px; width: 320px; }
     .trade-name { text-align: center; font-size: 17px; font-weight: 700; margin-bottom: 2px; color: #222; }
     .divider { border: none; border-top: 1px dashed #aaa; margin: 10px 0; }
     .label-senha { text-align: center; font-size: 12px; color: #222; text-transform: uppercase; letter-spacing: 1px; }
@@ -530,8 +532,8 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
     .footer { margin-top: 12px; text-align: center; font-size: 12px; color: #222; padding-bottom: 8px; }
     @media print {
       body { background: none; padding: 0; margin: 0; }
-      .ticket { border: none; width: auto; padding: 8px 12px 20px 12px; }
-      .footer { padding-bottom: 12px; page-break-inside: avoid; }
+      .ticket { border: none; width: auto; padding: 16px 12px 28px 12px; }
+      .footer { padding-bottom: 20px; page-break-inside: avoid; }
     }
   </style>
 </head>

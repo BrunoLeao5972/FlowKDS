@@ -1174,20 +1174,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
               </div>
 
               <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">Timer e Impressao</p>
-                  <button
-                    onClick={() => settings.setAnimationsEnabled(!settings.animationsEnabled)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                      settings.animationsEnabled
-                        ? 'bg-green-100 text-green-700 hover:bg-green-200 border border-green-200'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200'
-                    }`}
-                    title={settings.animationsEnabled ? 'Desativar piscar nos cards atrasados' : 'Ativar piscar nos cards atrasados'}
-                  >
-                    {settings.animationsEnabled ? '🔔 Piscar Ativo' : '🔕 Piscar Desligado'}
-                  </button>
-                </div>
+                <p className="text-sm font-medium">Timer e Impressao</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
                     <label className="block mb-1.5 text-sm font-medium">Tempo médio (min):</label>
@@ -1799,6 +1786,32 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                     <span
                       className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
                         isDarkMode ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="border-t border-border/60 mt-3 pt-3" />
+
+                {/* Efeitos Visuais - Cards Atrasados */}
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">Efeitos Visuais</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Piscar cards de pedidos atrasados na cozinha
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => settings.setAnimationsEnabled(!settings.animationsEnabled)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      settings.animationsEnabled ? 'bg-green-600' : 'bg-gray-300'
+                    }`}
+                    title={settings.animationsEnabled ? 'Desativar piscar nos cards atrasados' : 'Ativar piscar nos cards atrasados'}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        settings.animationsEnabled ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
                   </button>

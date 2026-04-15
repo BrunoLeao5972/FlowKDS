@@ -526,7 +526,7 @@ function buildTicketText(payload) {
   const printerName = String(payload.printerName || '').trim() || 'Nao definida';
   const printSize = String(payload.printSize || '80mm').trim();
   return [
-    'FLOW KDS - SENHA DO PEDIDO',
+    'FOX KDS - SENHA DO PEDIDO',
     '================================',
     `Senha: ${orderNumber}`,
     `Cliente: ${customerName}`,

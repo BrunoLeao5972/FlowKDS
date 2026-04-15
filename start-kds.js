@@ -12,7 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SERVER_DIR = path.join(__dirname, 'server');
 
-const APP_NAME = 'Flow KDS';
+const APP_NAME = 'FOX KDS';
 const LOG_DIR = path.join(__dirname, '.kds-logs');
 const children = [];
 
@@ -76,10 +76,10 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 function main() {
-  log(`╔════════════════════════════════════════╗`);
-  log(`║ ${APP_NAME.padEnd(38)} ║`);
-  log(`║ Sistema completo com Sync SQL2014      ║`);
-  log(`╚════════════════════════════════════════╝`);
+  log(`╔══════════════════════════════════════════════════════╗`);
+  log(`║ ${APP_NAME.padEnd(52)} ║`);
+  log(`║ ${'PROJETO KDS - A SUA COZINHA AINDA MAIS EFICIENTE'.padEnd(52)} ║`);
+  log(`╚══════════════════════════════════════════════════════╝`);
 
   startProcess(
     'KDS Server (Express)',

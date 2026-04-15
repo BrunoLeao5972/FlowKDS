@@ -503,12 +503,12 @@ function shouldSuppressPrint(serviceMode) {
   return mode === 'mesa' || mode === 'cartao' || mode === '2' || mode === '3' || mode === '17' || mode === '21';
 }
 
-// Normaliza nome do cliente - substitui valores genéricos por 'Cliente não identificado'
+// Normaliza nome do cliente - substitui valores genéricos por string vazia
 function normalizeCustomerName(name) {
   const normalized = String(name || '').trim().toLowerCase();
   const genericNames = ['0', 'geral', 'cliente 0', 'cliente geral', 'nao identificado', 'não identificado', 'sem nome'];
   if (genericNames.includes(normalized) || normalized === '') {
-    return 'Cliente não identificado';
+    return '';
   }
   return String(name).trim();
 }
@@ -597,6 +597,13 @@ async function syncCycle(pool, state, queryText, options = {}) {
 
   const orders = groupRowsToOrders(rows);
   console.log(`[sql2014-bridge] agrupado em ${orders.length} pedidos`);
+  
+  // Log dos primeiros pedidos para debug de sellerName
+  if (orders.length > 0) {
+    orders.slice(0, 3).forEach(o => {
+      console.log(`[sql2014-bridge] pedido ${o.externalId}: sellerName=${o.sellerName || 'null'}, attendant=${o.attendant}, serviceMode=${o.serviceMode}`);
+    });
+  }
 
   if (!orders.length) {
     return { processed: 0, created: 0, updated: 0, skipped: 0, lastSyncAt: state.lastSyncAt };
