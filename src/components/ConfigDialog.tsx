@@ -91,6 +91,17 @@ interface SectorData {
   isActive?: boolean;
 }
 
+const BUILTIN_SONG_OPTIONS = [
+  {
+    value: '/Songs/Efeito Sonoro - Chegou Pedido.mp3',
+    label: 'Efeito Sonoro - Chegou Pedido',
+  },
+  {
+    value: '/Songs/Efeito Sonoro - Pedido Pronto.mp3',
+    label: 'Efeito Sonoro - Pedido Pronto',
+  },
+] as const;
+
 /**
  * Shape do payload retornado por GET /reports/operational.
  * Todos os campos são opcionais pois dependem de pedidos no período.
@@ -170,6 +181,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [showReportsPanel, setShowReportsPanel] = useState(false);
   const [showSupportPanel, setShowSupportPanel] = useState(false);
   const [showThemePanel, setShowThemePanel] = useState(false);
+  const [themeSubTab, setThemeSubTab] = useState<'theme' | 'sounds'>('theme');
 
   // Estados de erro e carregamento para o painel de permissões
   const [permError, setPermError] = useState('');
@@ -220,10 +232,16 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [licenseContent, setLicenseContent] = useState<string | null>(settings.licenseContent || null);
 
   // Sons configuráveis: data URL do arquivo de áudio e flag de ativação
-  const [newOrderSoundData, setNewOrderSoundData] = useState<string | null>(settings.newOrderSound || null);
-  const [readyOrderSoundData, setReadyOrderSoundData] = useState<string | null>(settings.readyOrderSound || null);
-  const [newOrderEnabled, setNewOrderEnabled] = useState<boolean>(settings.newOrderSoundEnabled ?? true);
-  const [readyEnabled, setReadyEnabled] = useState<boolean>(settings.readyOrderSoundEnabled ?? true);
+  const [newOrderSoundData, setNewOrderSoundDataLocal] = useState<string | null>(settings.newOrderSound || null);
+  const [readyOrderSoundData, setReadyOrderSoundDataLocal] = useState<string | null>(settings.readyOrderSound || null);
+  const [newOrderEnabled, setNewOrderEnabledLocal] = useState<boolean>(settings.newOrderSoundEnabled ?? true);
+  const [readyEnabled, setReadyEnabledLocal] = useState<boolean>(settings.readyOrderSoundEnabled ?? true);
+
+  // Wrappers que persistem imediatamente no SettingsContext (sem precisar clicar em Salvar)
+  const setNewOrderSoundData = (v: string | null) => { setNewOrderSoundDataLocal(v); settings.setNewOrderSound(v); };
+  const setReadyOrderSoundData = (v: string | null) => { setReadyOrderSoundDataLocal(v); settings.setReadyOrderSound(v); };
+  const setNewOrderEnabled = (v: boolean) => { setNewOrderEnabledLocal(v); settings.setNewOrderSoundEnabled(v); };
+  const setReadyEnabled = (v: boolean) => { setReadyEnabledLocal(v); settings.setReadyOrderSoundEnabled(v); };
   const [printerName, setPrinterName] = useState(settings.printerName || '');
   const [printSize, setPrintSize] = useState<'58mm' | '80mm' | 'A4'>(settings.printSize || '80mm');
   const [selectedServiceModes, setSelectedServiceModes] = useState<ServiceMode[]>(
@@ -574,6 +592,14 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     fr.onerror = reject;
     fr.readAsDataURL(file);
   });
+
+  const normalizeAudioSource = (rawValue: string): string | null => {
+    const value = String(rawValue || '').trim();
+    if (!value) return null;
+    if (/^(data:|blob:|https?:\/\/)/i.test(value)) return value;
+    const prefixed = value.startsWith('/') ? value : `/Songs/${value}`;
+    return encodeURI(prefixed);
+  };
 
   /** Carrega o arquivo de som para novo pedido como Data URL. */
   const handleNewFile = async (f?: File) => {
@@ -1006,6 +1032,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     setShowReportsPanel(false);
     setShowSupportPanel(false);
     setShowThemePanel(false);
+    setThemeSubTab('theme');
   };
 
   // Menu items
@@ -1762,61 +1789,234 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
           {/* TAB: TEMA */}
           {showThemePanel && (
             <div className="space-y-4">
-              <div className="rounded-md border border-border p-4 bg-muted/10 space-y-3">
-                <h3 className="font-semibold text-base">🌙 Modo Noturno</h3>
-                <p className="text-xs text-muted-foreground">Ative o modo escuro para melhor visualização em ambientes com pouca luz</p>
-                
-                <div className="border-t border-border/60 mt-3 pt-3" />
-                
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Modo Escuro</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {isDarkMode ? '✓ Ativado' : '○ Desativado'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={toggleDarkMode}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      isDarkMode ? 'bg-blue-600' : 'bg-gray-300'
-                    }`}
-                    title={isDarkMode ? 'Desativar modo escuro' : 'Ativar modo escuro'}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        isDarkMode ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="border-t border-border/60 mt-3 pt-3" />
-
-                {/* Efeitos Visuais - Cards Atrasados */}
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium">Efeitos Visuais</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Piscar cards de pedidos atrasados na cozinha
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => settings.setAnimationsEnabled(!settings.animationsEnabled)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      settings.animationsEnabled ? 'bg-green-600' : 'bg-gray-300'
-                    }`}
-                    title={settings.animationsEnabled ? 'Desativar piscar nos cards atrasados' : 'Ativar piscar nos cards atrasados'}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        settings.animationsEnabled ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
+              <div className="flex items-center gap-2 border-b border-border pb-2">
+                <button
+                  type="button"
+                  onClick={() => setThemeSubTab('theme')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    themeSubTab === 'theme'
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-muted text-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  Temas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setThemeSubTab('sounds')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                    themeSubTab === 'sounds'
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-muted text-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  Sons
+                </button>
               </div>
+
+              {themeSubTab === 'theme' && (
+                <div className="rounded-md border border-border p-4 bg-muted/10 space-y-3">
+                  <h3 className="font-semibold text-base">🌙 Modo Noturno</h3>
+                  <p className="text-xs text-muted-foreground">Ative o modo escuro para melhor visualização em ambientes com pouca luz</p>
+
+                  <div className="border-t border-border/60 mt-3 pt-3" />
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Modo Escuro</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {isDarkMode ? '✓ Ativado' : '○ Desativado'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleDarkMode}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        isDarkMode ? 'bg-blue-600' : 'bg-gray-300'
+                      }`}
+                      title={isDarkMode ? 'Desativar modo escuro' : 'Ativar modo escuro'}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                          isDarkMode ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <div className="border-t border-border/60 mt-3 pt-3" />
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Efeitos Visuais</p>
+                      <p className="text-xs text-muted-foreground mt-1">Piscar cards de pedidos atrasados na cozinha</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => settings.setAnimationsEnabled(!settings.animationsEnabled)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        settings.animationsEnabled ? 'bg-green-600' : 'bg-gray-300'
+                      }`}
+                      title={settings.animationsEnabled ? 'Desativar piscar nos cards atrasados' : 'Ativar piscar nos cards atrasados'}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                          settings.animationsEnabled ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {themeSubTab === 'sounds' && (
+                <div className="rounded-md border border-border p-4 bg-muted/10 space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-base">Alertas Sonoros</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Configure sons em mp3 para novo pedido e pedido pronto. Sons da pasta pública podem ser usados via caminho /Songs/arquivo.mp3.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                    <div className="rounded-md border border-border bg-background p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">Som: Novo pedido</p>
+                          <p className="text-xs text-muted-foreground">Dispara ao chegar pedido novo</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setNewOrderEnabled(!newOrderEnabled)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            newOrderEnabled ? 'bg-green-600' : 'bg-gray-300'
+                          }`}
+                          title={newOrderEnabled ? 'Desativar som de novo pedido' : 'Ativar som de novo pedido'}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                              newOrderEnabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Sons da pasta pública</label>
+                        <select
+                          className="input w-full h-9 rounded-md text-sm"
+                          value={BUILTIN_SONG_OPTIONS.some(option => option.value === newOrderSoundData) ? newOrderSoundData || '' : ''}
+                          onChange={e => setNewOrderSoundData(normalizeAudioSource(e.target.value))}
+                        >
+                          <option value="">Selecione um mp3...</option>
+                          {BUILTIN_SONG_OPTIONS.map(option => (
+                            <option key={`new-${option.value}`} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Caminho personalizado</label>
+                        <input
+                          type="text"
+                          className="input w-full h-9 rounded-md text-sm"
+                          value={newOrderSoundData || ''}
+                          onChange={e => setNewOrderSoundData(normalizeAudioSource(e.target.value))}
+                          placeholder="/Songs/meu-alerta.mp3"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-xs font-semibold text-muted-foreground">Upload mp3:</label>
+                        <input
+                          type="file"
+                          accept="audio/mpeg,.mp3"
+                          onChange={e => void handleNewFile(e.target.files?.[0])}
+                          className="text-xs"
+                        />
+                        <button
+                          type="button"
+                          className="h-8 px-3 rounded-md border border-input bg-background text-sm"
+                          onClick={() => play(newOrderSoundData)}
+                          disabled={!newOrderSoundData}
+                        >
+                          Testar
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-md border border-border bg-background p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">Som: Pedido pronto</p>
+                          <p className="text-xs text-muted-foreground">Dispara na transição para pronto</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setReadyEnabled(!readyEnabled)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            readyEnabled ? 'bg-green-600' : 'bg-gray-300'
+                          }`}
+                          title={readyEnabled ? 'Desativar som de pedido pronto' : 'Ativar som de pedido pronto'}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                              readyEnabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Sons da pasta pública</label>
+                        <select
+                          className="input w-full h-9 rounded-md text-sm"
+                          value={BUILTIN_SONG_OPTIONS.some(option => option.value === readyOrderSoundData) ? readyOrderSoundData || '' : ''}
+                          onChange={e => setReadyOrderSoundData(normalizeAudioSource(e.target.value))}
+                        >
+                          <option value="">Selecione um mp3...</option>
+                          {BUILTIN_SONG_OPTIONS.map(option => (
+                            <option key={`ready-${option.value}`} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Caminho personalizado</label>
+                        <input
+                          type="text"
+                          className="input w-full h-9 rounded-md text-sm"
+                          value={readyOrderSoundData || ''}
+                          onChange={e => setReadyOrderSoundData(normalizeAudioSource(e.target.value))}
+                          placeholder="/Songs/meu-pronto.mp3"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-xs font-semibold text-muted-foreground">Upload mp3:</label>
+                        <input
+                          type="file"
+                          accept="audio/mpeg,.mp3"
+                          onChange={e => void handleReadyFile(e.target.files?.[0])}
+                          className="text-xs"
+                        />
+                        <button
+                          type="button"
+                          className="h-8 px-3 rounded-md border border-input bg-background text-sm"
+                          onClick={() => play(readyOrderSoundData)}
+                          disabled={!readyOrderSoundData}
+                        >
+                          Testar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Dica: para usar áudio fixo do sistema, coloque o arquivo em public/Songs e informe o caminho em formato /Songs/nome-do-arquivo.mp3.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

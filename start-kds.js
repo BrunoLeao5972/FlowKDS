@@ -77,8 +77,7 @@ process.on('SIGTERM', shutdown);
 
 function main() {
   log(`╔══════════════════════════════════════════════════════╗`);
-  log(`║ ${APP_NAME.padEnd(52)} ║`);
-  log(`║ ${'PROJETO KDS - A SUA COZINHA AINDA MAIS EFICIENTE'.padEnd(52)} ║`);
+  log(`║ ${'PROJETO KDS - A SUA COZINHA AINDA MAIS EFICIENTE 🦊'.padEnd(52)} ║`);
   log(`╚══════════════════════════════════════════════════════╝`);
 
   startProcess(

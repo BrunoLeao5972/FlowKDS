@@ -7,6 +7,37 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/spec
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-04-16
+
+### Adicionado
+- Aba de Sons dentro de Configuracoes > Tema, com selecao de arquivos MP3 do sistema, caminho customizado, upload e teste de audio.
+- Novos assets de som em `public/Songs`, incluindo alertas para novo pedido e pedido pronto.
+
+### Corrigido
+- Fluxo de pedidos em maquinas lentas com deduplicacao defensiva no frontend e idempotencia no backend via `externalId`.
+- Nome do cliente no painel publico limitado para evitar invasao visual entre cards, com quebra de linha controlada.
+- Persistencia imediata das configuracoes de som para manter a ultima selecao do cliente sem reconfiguracao manual.
+
+### Alterado
+- Padrao inicial de som de novo pedido atualizado para usar arquivo publico do sistema.
+- Ajustes de imagens de login e organizacao de assets antigos no diretorio `public`.
+- Inicializacao do `start-kds.js` com logs dedicados e bootstrap mais previsivel entre servidor e bridge SQL.
+
+### Infra
+- Vite passou a expor proxy para `/Songs` no ambiente local.
+- Versao do app atualizada para `2.0.2` e sincronizada com `src/lib/version.ts`.
+
+## [2.0.1] - 2026-04-15
+
+### Corrigido
+- Script `scripts/update-version.js` ajustado para ESM, garantindo sincronizacao automatica da versao sem erro em projetos com `"type": "module"`.
+
+### Alterado
+- Rebrand consolidado para FOX KDS na descricao de versao exibida no frontend (`src/lib/version.ts`).
+
+### Infra
+- Adicionado ignore de arquivos de runtime do bridge SQL (`server/scripts/.sql2014-bridge.pid` e `server/scripts/.sql2014-bridge-state.json`) para evitar sujeira em release.
+
 ## [2.0.0] - 2025-04-15
 
 ### Adicionado

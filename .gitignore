@@ -25,6 +25,8 @@ dist-ssr
 
 # Project specific
 server/kds.json
+server/scripts/.sql2014-bridge.pid
+server/scripts/.sql2014-bridge-state.json
 dist-electron/
 *.rar
 *.exe

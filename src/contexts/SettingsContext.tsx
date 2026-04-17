@@ -85,7 +85,7 @@ const defaultValues: Settings = {
   restaurantComplement: '',
   licenseFileName: null,
   licenseContent: null,
-  newOrderSound: null,
+  newOrderSound: '/Songs/Efeito Sonoro - Chegou.mp3',
   readyOrderSound: null,
   newOrderSoundEnabled: true,
   readyOrderSoundEnabled: true,

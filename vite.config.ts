@@ -10,6 +10,10 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      '/api': 'http://localhost:8081',
+      '/Songs': 'http://localhost:8081',
+    },
   },
   plugins: [react()].filter(Boolean),
   resolve: {

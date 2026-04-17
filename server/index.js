@@ -1499,11 +1499,24 @@ app.post('/orders', asyncHandler(async (req, res) => {
     }
   }
 
+  const externalId = String(req.body?.externalid ?? req.body?.externalId ?? '').trim() || null;
+  if (externalId) {
+    const existingOrder = await Order.findOne({
+      tenantId: LEGACY_TENANT_ID,
+      externalId,
+    }).lean();
+
+    if (existingOrder) {
+      return res.status(200).json(toISO(existingOrder));
+    }
+  }
+
   const id = crypto.randomUUID();
   const now = Date.now();
   const order = {
     tenantId: LEGACY_TENANT_ID,
     id,
+    externalId,
     number,
     customerName: customerName || '',
     serviceMode,

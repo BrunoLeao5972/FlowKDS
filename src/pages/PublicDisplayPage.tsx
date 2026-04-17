@@ -3,7 +3,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell } from 'lucide-react';
-import { getDisplayCustomerName } from '@/lib/customerName';
+import { getDisplayCustomerName, getPanelCustomerName } from '@/lib/customerName';
 
 const RECENT_WINDOW_HOURS = 3;
 const SECRET_THEME_CODE = '190';
@@ -50,8 +50,8 @@ function OrderCard({ order, variant }: OrderCardProps) {
           >
             {order.number}
           </span>
-          <p className="text-base md:text-lg mt-1 tema-text-secondary font-medium">
-            {getDisplayCustomerName(order.customerName)}
+          <p className="text-base md:text-lg mt-1 tema-text-secondary font-medium break-words">
+            {getPanelCustomerName(order.customerName)}
           </p>
         </>
       ) : (

@@ -49,6 +49,36 @@ const normalizeServiceMode = (value: unknown): ServiceMode | null => {
   return aliases[normalized] || null;
 };
 
+const getOrderIdentityKey = (order: Partial<Order> & { id?: string | null; externalId?: string | null }) => {
+  const externalId = String(order.externalId || '').trim();
+  if (externalId) return `external:${externalId}`;
+  return `id:${String(order.id || '').trim()}`;
+};
+
+const sortOrdersByCreatedAt = (orders: Order[]) => [...orders].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+const dedupeOrders = (orders: Order[]) => {
+  const byIdentity = new Map<string, Order>();
+
+  for (const order of orders) {
+    const key = getOrderIdentityKey(order);
+    const previous = byIdentity.get(key);
+    if (!previous || order.updatedAt.getTime() >= previous.updatedAt.getTime()) {
+      byIdentity.set(key, order);
+    }
+  }
+
+  return sortOrdersByCreatedAt([...byIdentity.values()]);
+};
+
+const replaceOrderByIdentity = (orders: Order[], nextOrder: Order) => {
+  const key = getOrderIdentityKey(nextOrder);
+  return sortOrdersByCreatedAt([
+    ...orders.filter(order => getOrderIdentityKey(order) !== key),
+    nextOrder,
+  ]);
+};
+
 // Pedidos de mesa e cartão não geram ticket de balcão/cozinha.
 const shouldPrintTicket = (order: Pick<Order, 'serviceMode'>): boolean => {
   const mode = normalizeServiceMode(order.serviceMode);
@@ -465,6 +495,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           const data: Order[] = await resp.json();
           const normalized = data.map(d => ({
             ...d,
+            externalId: (d as any).externalId || null,
             customerName: getDisplayCustomerName(d.customerName),
             serviceMode: normalizeServiceMode((d as any).serviceMode ?? (d as any).modality ?? (d as any).tipoAtendimento),
             cookId: d.cookId || null,
@@ -479,7 +510,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             cancelledAt: d.cancelledAt ? new Date(d.cancelledAt) : undefined,
             cancelAcknowledgedAt: d.cancelAcknowledgedAt ? new Date(d.cancelAcknowledgedAt) : undefined,
           } as Order));
-          setOrders(normalized.filter(order => isOrderAllowedByServiceMode(order)));
+          setOrders(dedupeOrders(normalized.filter(order => isOrderAllowedByServiceMode(order))));
         }
       } catch (err) {
         console.warn('Could not load orders from API', err);
@@ -506,6 +537,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       socket.on('orders:created', (o: Order) => {
         const normalized = {
           ...o,
+          externalId: (o as any).externalId || null,
           customerName: getDisplayCustomerName(o.customerName),
           serviceMode: normalizeServiceMode((o as any).serviceMode ?? (o as any).modality ?? (o as any).tipoAtendimento),
           cookId: o.cookId || null,
@@ -524,8 +556,11 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         setOrders(prev => {
-          // Evita duplicatas caso haja reconexão/socket replay.
-          if (prev.find(p => p.id === normalized.id)) return prev;
+          const alreadyExists = prev.some(order => getOrderIdentityKey(order) === getOrderIdentityKey(normalized));
+          if (alreadyExists) {
+            return replaceOrderByIdentity(prev, normalized);
+          }
+
           // Toca som de novo pedido quando habilitado nas preferências.
           try {
             if (settings?.newOrderSoundEnabled && settings.newOrderSound) {
@@ -533,13 +568,14 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
               a.play().catch(() => {});
             }
           } catch (e) {}
-          return [...prev, normalized].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+          return sortOrdersByCreatedAt([...prev, normalized]);
         });
       });
 
       socket.on('orders:updated', (o: Order) => {
         const normalized = {
           ...o,
+          externalId: (o as any).externalId || null,
           customerName: getDisplayCustomerName(o.customerName),
           serviceMode: normalizeServiceMode((o as any).serviceMode ?? (o as any).modality ?? (o as any).tipoAtendimento),
           cookId: o.cookId || null,
@@ -555,30 +591,26 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           cancelAcknowledgedAt: o.cancelAcknowledgedAt ? new Date(o.cancelAcknowledgedAt) : undefined,
         } as Order;
         setOrders(prev => {
-          const alreadyExists = prev.some(p => p.id === normalized.id);
+          const previousOrder = prev.find(order => getOrderIdentityKey(order) === getOrderIdentityKey(normalized));
           if (!isOrderAllowedByServiceMode(normalized)) {
-            return prev.filter(p => p.id !== normalized.id);
+            return prev.filter(order => getOrderIdentityKey(order) !== getOrderIdentityKey(normalized));
           }
 
-          if (!alreadyExists) {
-            return [...prev, normalized].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+          if (!previousOrder) {
+            return sortOrdersByCreatedAt([...prev, normalized]);
           }
 
-          return prev.map(p => {
-            if (p.id === normalized.id) {
-              // Som de pronto dispara apenas na transição para ready.
-              try {
-                if (normalized.status === 'ready' && p.status !== 'ready') {
-                  if (settings?.readyOrderSoundEnabled && settings.readyOrderSound) {
-                    const a = new Audio(settings.readyOrderSound);
-                    a.play().catch(() => {});
-                  }
-                }
-              } catch (e) {}
-              return normalized;
+          // Som de pronto dispara apenas na transição para ready.
+          try {
+            if (normalized.status === 'ready' && previousOrder.status !== 'ready') {
+              if (settings?.readyOrderSoundEnabled && settings.readyOrderSound) {
+                const a = new Audio(settings.readyOrderSound);
+                a.play().catch(() => {});
+              }
             }
-            return p;
-          });
+          } catch (e) {}
+
+          return replaceOrderByIdentity(prev, normalized);
         });
       });
 
