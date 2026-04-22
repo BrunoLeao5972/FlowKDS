@@ -153,7 +153,9 @@ export default function AdminPage() {
     .filter(o => {
       if (!search) return true;
       const s = search.toLowerCase();
-      return o.number.toString().includes(s) || o.customerName.toLowerCase().includes(s);
+      return o.number.toString().includes(s)
+        || o.customerName.toLowerCase().includes(s)
+        || String(o.externalId || '').toLowerCase().includes(s);
     })
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
@@ -314,6 +316,11 @@ export default function AdminPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-lg">{order.number}</span>
+                          {order.externalId && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+                              Lancamento #{order.externalId}
+                            </span>
+                          )}
                           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-primary-foreground ${cfg.colorClass}`}>
                             <Icon className="w-3 h-3" />
                             {STATUS_LABELS[order.status]}
@@ -427,7 +434,12 @@ export default function AdminPage() {
                         exit={{ opacity: 0 }}
                         className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
                       >
-                        <td className="p-4 font-bold text-lg">{order.number}</td>
+                        <td className="p-4">
+                          <div className="font-bold text-lg">{order.number}</div>
+                          {order.externalId && (
+                            <div className="text-xs text-muted-foreground">Lancamento #{order.externalId}</div>
+                          )}
+                        </td>
                         <td className="p-4">{getAdminCustomerName(order.customerName)}</td>
                         <td className="p-4 hidden md:table-cell">
                           <div className="flex flex-col gap-1">

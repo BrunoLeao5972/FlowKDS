@@ -45,11 +45,9 @@ Write-Host "[6/7] Gerando scripts de inicializacao..."
 cd /d %~dp0
 if not exist ".env" (
   if exist ".env.example" copy /Y ".env.example" ".env" >nul
-  echo [ERRO] Arquivo .env nao encontrado.
+  echo [AVISO] Arquivo .env nao encontrado.
   echo Foi criado um .env a partir do .env.example.
-  echo Edite o .env e configure MONGODB_URI, SQL2014_* e credenciais.
-  pause
-  exit /b 1
+  echo Revise credenciais e configuracoes quando necessario.
 )
 
 kds-server.exe
@@ -66,11 +64,9 @@ if errorlevel 1 (
 cd /d %~dp0
 if not exist ".env" (
   if exist ".env.example" copy /Y ".env.example" ".env" >nul
-  echo [ERRO] Arquivo .env nao encontrado.
+  echo [AVISO] Arquivo .env nao encontrado.
   echo Foi criado um .env a partir do .env.example.
-  echo Edite o .env e configure SQL2014_* e KDS_*.
-  pause
-  exit /b 1
+  echo Revise credenciais e configuracoes quando necessario.
 )
 
 kds-bridge.exe

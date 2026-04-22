@@ -15,7 +15,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const STORAGE_TOKEN = 'kds_auth_token';
 const STORAGE_USER = 'kds_auth_user';
 const STORAGE_PERMISSIONS = 'kds_auth_permissions';
-const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings'];
+const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings', 'reports'];
 
 // Mantém o mesmo cálculo de base usado pelos outros contextos.
 function getApiBase() {

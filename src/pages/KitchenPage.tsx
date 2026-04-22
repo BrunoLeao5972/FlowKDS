@@ -1,3 +1,4 @@
+import { getResponsibleDisplayName } from '@/lib/customerName';
 import { useOrders } from '@/contexts/OrderContext';
 import { useSettings } from '@/contexts/SettingsContext';
 import { Order, OrderItem, ItemStatus, STATUS_LABELS } from '@/types/order';
@@ -136,7 +137,10 @@ export default function KitchenPage() {
 
   // Pedidos filtrados para a aba de setor ativo (exclui pedidos sem itens daquele setor e pedidos com todos os itens do setor já prontos)
   const ordersForTab = activeTab === 'all'
-    ? activeOrders
+    ? activeOrders.filter(o => {
+        if (o.status === 'cancelled') return true;
+        return o.items.some(it => getEffectiveItemStatus(o, it) !== 'ready');
+      })
     : activeOrders.filter(o => {
         const sectorItems = o.items.filter(it => it.sectorId === activeTab);
         if (sectorItems.length === 0) return false;
@@ -165,7 +169,9 @@ export default function KitchenPage() {
   /** Filtra itens de um pedido conforme a aba ativa. */
   function visibleItems(order: Order): Array<{ item: OrderItem; itemIndex: number }> {
     if (activeTab === 'all') {
-      return order.items.map((item, itemIndex) => ({ item, itemIndex }));
+      return order.items
+        .map((item, itemIndex) => ({ item, itemIndex }))
+        .filter(({ item }) => order.status === 'cancelled' || getEffectiveItemStatus(order, item) !== 'ready');
     }
 
     return order.items
@@ -175,7 +181,7 @@ export default function KitchenPage() {
 
   // Mantem consistencia visual: pedido recebido nao pode mostrar item em preparo.
   function getEffectiveItemStatus(order: Order, item: OrderItem): ItemStatus {
-    if (order.status === 'received') return 'waiting';
+    if (order.status === 'received') return item.itemStatus ?? 'waiting';
     if (order.status === 'ready') return 'ready';
     return item.itemStatus ?? 'waiting';
   }
@@ -324,6 +330,16 @@ export default function KitchenPage() {
                   <Timer startTime={order.createdAt} colorClass={getTimerColor(minutes)} />
                 </div>
 
+                <p className="text-xs text-muted-foreground -mt-2">
+                  Pedido as {order.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+
+                {order.externalId && (
+                  <p className="text-xs text-muted-foreground -mt-2">
+                    Lancamento #{order.externalId}
+                  </p>
+                )}
+
                 {/* Status do pedido */}
                 <div className={`inline-flex self-start items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
                   isCancelled ? 'bg-status-cancelled text-primary-foreground'
@@ -350,13 +366,18 @@ export default function KitchenPage() {
                     : order.serviceMode === 'servico' ? 'text-cyan-600 dark:text-cyan-400'
                     : 'text-muted-foreground'
                   }`}>
-                    {/* Para Mesa, Cartão e Apartamento: mostra nome do vendedor se disponível, senão o número */}
-                    {order.serviceMode === 'mesa' && (order.sellerName || `Mesa ${order.attendant}`)}
-                    {order.serviceMode === 'cartao' && (order.sellerName || `Cartão ${order.attendant}`)}
-                    {order.serviceMode === 'apartamento' && (order.sellerName || `Apto ${order.attendant}`)}
-                    {order.serviceMode === 'servico' && `Serviço ${order.attendant}`}
-                    {(order.serviceMode === 'balcao' || order.serviceMode === 'delivery' || order.serviceMode === 'encomenda') && `Atendente: ${order.attendant}`}
+                    {getResponsibleDisplayName({
+                      serviceMode: order.serviceMode,
+                      attendant: order.attendant,
+                      sellerName: order.sellerName,
+                    })}
                   </p>
+                )}
+
+                {order.integratorName && (
+                  <div className="-mt-2 inline-flex self-start items-center gap-1.5 px-2.5 py-1 rounded-md border border-orange-200 bg-orange-50 text-orange-700 text-xs font-bold">
+                    Integradora: {order.integratorName}
+                  </div>
                 )}
 
                 {/* Itens (filtrados pelo setor ativo) */}

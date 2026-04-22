@@ -30,6 +30,7 @@ const restaurantSettingsSchema = new mongoose.Schema(
     animationsEnabled: { type: Boolean, default: true },
     updatedBy: { type: String, default: null },
     enabledServiceModes: [{ type: String, default: null }],
+    panelEnabledServiceModes: [{ type: String, default: null }],
   },
   {
     collection: 'restaurant_settings',

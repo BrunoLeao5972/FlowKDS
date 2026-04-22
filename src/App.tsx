@@ -17,11 +17,14 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+const KNOWN_ROUTES = ['/', '/login', '/kitchen', '/display'];
+
 function AppContent() {
   const location = useLocation();
   const isLoginPage = location.pathname === '/login';
   const isDisplayPage = location.pathname === '/display';
-  const isFullscreen = isLoginPage || isDisplayPage;
+  const isNotFoundPage = !KNOWN_ROUTES.includes(location.pathname);
+  const isFullscreen = isLoginPage || isDisplayPage || isNotFoundPage;
 
   return (
     <>
@@ -39,7 +42,7 @@ function AppContent() {
         </Routes>
       </div>
       
-      {!isLoginPage && (
+      {!isLoginPage && !isNotFoundPage && (
         <footer className="fixed bottom-0 left-0 w-full py-2 text-center text-sm text-foreground z-40">
           <div className="max-w-7xl mx-auto px-4">Solução Sistemas - A sua cozinha ainda mais eficiente</div>
         </footer>

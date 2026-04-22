@@ -35,6 +35,32 @@ const KDS_API_BASE = String(process.env.KDS_API_BASE || 'http://127.0.0.1:8081')
 const SQL_QUERY_FILE = process.env.SQL2014_QUERY_FILE ? path.resolve(RUNTIME_DIR, process.env.SQL2014_QUERY_FILE) : null;
 const SQL_QUERY = process.env.SQL2014_QUERY || '';
 const SQL_STATUS_MODE = String(process.env.SQL2014_STATUS_MODE || 'parity').trim().toLowerCase();
+const SQL_START_FROM_NOW = toBool(getEnv('SQL2014_START_FROM_NOW', 'true'), true);
+const SQL_SYNC_OVERLAP_MS = Math.max(0, Number(getEnv('SQL2014_SYNC_OVERLAP_MS', '1000')) || 0);
+const SQL_DISALLOW_HISTORICAL_REPLAY = toBool(getEnv('SQL2014_DISALLOW_HISTORICAL_REPLAY', 'true'), true);
+
+function getInitialLastSyncAt() {
+  // Em instalações sem state file, iniciar do "agora" evita reimportar histórico antigo.
+  if (SQL_START_FROM_NOW) {
+    return new Date().toISOString();
+  }
+
+  const configured = String(process.env.SQL2014_INITIAL_SYNC_AT || '').trim();
+  if (!configured) return '1970-01-01T00:00:00.000Z';
+  const parsed = new Date(configured);
+  if (Number.isNaN(parsed.getTime())) return '1970-01-01T00:00:00.000Z';
+  return parsed.toISOString();
+}
+
+function isPermanentOrderError(message) {
+  const normalized = String(message || '').toLowerCase();
+  return (
+    normalized.includes('service_mode_not_enabled')
+    || normalized.includes('unsupported service mode')
+    || normalized.includes('invalid order number')
+    || normalized.includes('validation')
+  );
+}
 
 function parseStatusMap(value) {
   const raw = String(value || '').trim();
@@ -130,11 +156,14 @@ function parseItems(itemsRaw) {
       .map(item => {
         const rawSector = item?.sectorId ?? item?.sectorid ?? item?.setorId ?? item?.setorid ?? item?.setor;
         const sectorNormalized = rawSector != null ? String(rawSector).trim() : '';
+        const rawSourceItemKey = item?.sourceItemKey ?? item?.sourceitemkey ?? item?.itemKey ?? item?.itemkey;
+        const sourceItemKey = rawSourceItemKey != null ? String(rawSourceItemKey).trim() : '';
         return {
           name: String(item?.name || '').trim(),
           quantity: Number(item?.quantity || 1),
           notes: String(item?.notes || ''),
           sectorId: sectorNormalized || null,
+          sourceItemKey: sourceItemKey || null,
         };
       })
       .filter(item => item.name);
@@ -150,6 +179,25 @@ function parseItems(itemsRaw) {
   }
 
   return [];
+}
+
+function parseLaunchCodeFromRow(row) {
+  const candidates = [
+    row.lancamentoid,
+    row.launchid,
+    row.launchcode,
+    row.pedidocodigo,
+    row.pedidoid,
+    row.idpedido,
+    row.externalid,
+  ];
+
+  for (const value of candidates) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+  }
+
+  return '';
 }
 
 function parseItemFromFlatRow(row) {
@@ -168,12 +216,16 @@ function parseItemFromFlatRow(row) {
 
   const rawSector = row.sectorid ?? row.setorid ?? row.setor;
   const sectorNormalized = rawSector != null ? String(rawSector).trim() : '';
+  const itemSequenceRaw = row.itemsequence ?? row.item ?? row.itemid;
+  const itemSequence = itemSequenceRaw != null ? String(itemSequenceRaw).trim() : '';
+  const launchCode = parseLaunchCodeFromRow(row);
 
   return {
     name,
     quantity: Number.isFinite(quantityNumber) && quantityNumber > 0 ? quantityNumber : 1,
     notes: String(row.itemnotes ?? row.observacoes ?? row.notes ?? ''),
     sectorId: sectorNormalized || null,
+    sourceItemKey: launchCode && itemSequence ? `${launchCode}:${itemSequence}` : null,
   };
 }
 
@@ -216,6 +268,20 @@ function parseSellerNameFromRow(row) {
     ?? ''
   ).trim();
   return raw || null;
+}
+
+function parseIntegratorFromRow(row) {
+  const idRaw = row.integratorid ?? row.integradora ?? row.integradoraid;
+  const nameRaw = row.integratorname ?? row.integradoranome;
+
+  const id = idRaw === undefined || idRaw === null || idRaw === '' ? null : String(idRaw).trim();
+  const name = String(nameRaw || '').trim() || null;
+
+  if (!id && !name) return null;
+  return {
+    id,
+    name,
+  };
 }
 
 function parseServiceModeFromRow(row) {
@@ -274,19 +340,21 @@ function groupRowsToOrders(rows) {
 
   for (const rawRow of rows) {
     const row = lowerCaseKeys(rawRow);
-    const externalId = String(row.externalid || '').trim();
-    if (!externalId) continue;
+    const launchCode = parseLaunchCodeFromRow(row);
+    if (!launchCode) continue;
 
     const updatedAt = parseUpdatedAt(row.updatedat);
     if (!updatedAt) continue;
 
-    if (!grouped.has(externalId)) {
-      grouped.set(externalId, {
-        externalId,
+    if (!grouped.has(launchCode)) {
+      grouped.set(launchCode, {
+        externalId: launchCode,
+        sourceExternalId: launchCode,
         number: row.number,
         customerName: row.customername,
         serviceMode: parseServiceModeFromRow(row),
         attendant: parseAttendantFromRow(row),
+        integrator: parseIntegratorFromRow(row),
         sellerName: parseSellerNameFromRow(row),
         observations: row.observations,
         status: row.status,
@@ -298,12 +366,15 @@ function groupRowsToOrders(rows) {
       });
     }
 
-    const current = grouped.get(externalId);
+    const current = grouped.get(launchCode);
     if (!current.serviceMode) {
       current.serviceMode = parseServiceModeFromRow(row);
     }
     if (!current.attendant) {
       current.attendant = parseAttendantFromRow(row);
+    }
+    if (!current.integrator) {
+      current.integrator = parseIntegratorFromRow(row);
     }
     if (!current.sellerName) {
       current.sellerName = parseSellerNameFromRow(row);
@@ -336,7 +407,7 @@ function groupRowsToOrders(rows) {
     const subItemValue = row.subitem ?? row.SubItem ?? row.SUBITEM ?? 0;
     const isInsumo = Number(subItemValue) > 0;
     if (isInsumo) {
-      console.log(`[sql2014-bridge] ignorando insumo: externalId=${externalId} item=${row.itemname || row.produtodescricao || '?'} subItem=${subItemValue}`);
+      console.log(`[sql2014-bridge] ignorando insumo: externalId=${launchCode} item=${row.itemname || row.produtodescricao || '?'} subItem=${subItemValue}`);
       continue;
     }
 
@@ -376,16 +447,36 @@ async function loadState() {
   try {
     const content = await fs.readFile(STATE_FILE, 'utf8');
     const parsed = JSON.parse(content);
+    const parsedLastSyncAt = parseUpdatedAt(parsed.lastSyncAt);
+    const idMap = parsed.idMap || {};
+    const hasMappedOrders = Object.keys(idMap).length > 0;
+    let lastSyncAt = parsedLastSyncAt ? parsedLastSyncAt.toISOString() : getInitialLastSyncAt();
+
+    // Proteção para ambiente novo/resetado: sem mapeamentos, nunca reprocessar histórico.
+    if (SQL_DISALLOW_HISTORICAL_REPLAY && !hasMappedOrders) {
+      const forcedNow = new Date().toISOString();
+      if (!parsedLastSyncAt || parsedLastSyncAt.getTime() < Date.now() - 60000) {
+        console.warn(
+          `[sql2014-bridge] replay historico bloqueado (state sem idMap). Ajustando lastSyncAt para agora: ${forcedNow}`
+        );
+      }
+      lastSyncAt = forcedNow;
+    }
+
     return {
-      lastSyncAt: parsed.lastSyncAt || process.env.SQL2014_INITIAL_SYNC_AT || '1970-01-01T00:00:00.000Z',
-      idMap: parsed.idMap || {},
+      lastSyncAt,
+      idMap,
       lastStatusByExternalId: parsed.lastStatusByExternalId || {},
+      blockedExternalIds: parsed.blockedExternalIds || {},
     };
   } catch {
+    const initialLastSyncAt = getInitialLastSyncAt();
+    console.warn(`[sql2014-bridge] state file nao encontrado; iniciando lastSyncAt=${initialLastSyncAt}`);
     return {
-      lastSyncAt: process.env.SQL2014_INITIAL_SYNC_AT || '1970-01-01T00:00:00.000Z',
+      lastSyncAt: initialLastSyncAt,
       idMap: {},
       lastStatusByExternalId: {},
+      blockedExternalIds: {},
     };
   }
 }
@@ -523,12 +614,16 @@ async function createOrderInKds(row, options = {}) {
 
   const payload = {
     number: Number(row.number),
+    externalid: String(row.externalid || '').trim() || undefined,
     customerName: normalizeCustomerName(row.customername),
     serviceMode: serviceMode,
     attendant: row.attendant || null,
+    integratorId: row.integrator?.id || null,
+    integratorName: row.integrator?.name || null,
     sellerName: row.sellerName || null,
     observations: String(row.observations || ''),
     items: parseItems(row.itemsjson),
+    sourceUpdatedAt: row.updatedAt || null,
     suppressAutoPrint: options.suppressAutoPrint === true || suppressPrint,
   };
 
@@ -574,6 +669,14 @@ function parseUpdatedAt(value) {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+}
+
+function buildNextLastSyncAt(maxSyncDate) {
+  const nextValue = new Date(maxSyncDate.getTime() - SQL_SYNC_OVERLAP_MS);
+  if (Number.isNaN(nextValue.getTime())) {
+    return maxSyncDate.toISOString();
+  }
+  return nextValue.toISOString();
 }
 
 async function syncCycle(pool, state, queryText, options = {}) {
@@ -631,54 +734,106 @@ async function syncCycle(pool, state, queryText, options = {}) {
     const mappedStatus = normalizeStatus(row.status);
     let kdsId = state.idMap[externalId];
 
-    if (!kdsId) {
-      const createdOrder = await createOrderInKds({
+    const blocked = state.blockedExternalIds?.[externalId];
+    if (blocked) {
+      skipped += 1;
+      continue;
+    }
+
+    try {
+      const syncedOrder = await createOrderInKds({
         number: row.number,
         customername: row.customerName,
         serviceMode: row.serviceMode,
         attendant: row.attendant,
+        integrator: row.integrator,
         sellerName: row.sellerName,
         observations: row.observations,
         itemsjson: row.items,
         externalid: externalId,
+        updatedAt: updatedAt.toISOString(),
       }, {
         suppressAutoPrint: options.suppressAutoPrint === true,
       });
-      kdsId = String(createdOrder.id);
-      state.idMap[externalId] = kdsId;
-      await saveState(state); // salva imediatamente para evitar duplicata em caso de crash
-      created += 1;
-    } else {
-      // Pedido já existe no KDS: preservar status se está em 'preparing' ou 'ready'
-      // Só sincronizar status novamente se voltou para 'received' na SQL (contra-sincronização)
-      const lastKnownStatus = state.lastStatusByExternalId[externalId] || 'received';
-      
-      // Apenas atualizar se a SQL força voltar para 'received' (caso contrário, respeita KDS)
-      if (mappedStatus === 'received' && lastKnownStatus !== 'received') {
-        // SQL voltou para 'received': pode significar cancelamento, então sincroniza
-        const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
-        if (didUpdate) {
-          state.lastStatusByExternalId[externalId] = mappedStatus;
-          updated += 1;
-        }
-      } else if (mappedStatus !== lastKnownStatus && mappedStatus !== 'preparing' && mappedStatus !== 'ready') {
-        // Apenas sincroniza status de 'cancelled' ou outros status administrativos
-        const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
-        if (didUpdate) {
-          state.lastStatusByExternalId[externalId] = mappedStatus;
-          updated += 1;
+
+      const syncedOrderId = String(syncedOrder?.id || '').trim() || null;
+      if (syncedOrderId) {
+        if (!kdsId) {
+          kdsId = syncedOrderId;
+          state.idMap[externalId] = kdsId;
+          await saveState(state); // salva imediatamente para evitar duplicata em caso de crash
+          created += 1;
+        } else if (kdsId !== syncedOrderId) {
+          console.warn(
+            `[sql2014-bridge] bloqueando replay de pedido removido: externalId=${externalId} kdsId antigo=${kdsId} novo=${syncedOrderId}`
+          );
+
+          // Se o pedido antigo foi removido no KDS/Mongo, nao ressuscitar automaticamente.
+          try {
+            await callKdsApi(`/orders/${encodeURIComponent(syncedOrderId)}`, { method: 'DELETE' });
+          } catch (deleteError) {
+            console.warn(
+              `[sql2014-bridge] falha ao remover replay externo externalId=${externalId} kdsId=${syncedOrderId}: ${String(deleteError?.message || deleteError || '')}`
+            );
+          }
+
+          state.blockedExternalIds[externalId] = {
+            blockedAt: new Date().toISOString(),
+            lastUpdatedAt: updatedAt.toISOString(),
+            reason: `stale_mapping_resurrection_blocked old=${kdsId} new=${syncedOrderId}`,
+          };
+          delete state.idMap[externalId];
+          await saveState(state);
+          skipped += 1;
+          continue;
         }
       }
-    }
 
-    if (!state.lastStatusByExternalId[externalId]) {
-      state.lastStatusByExternalId[externalId] = mappedStatus;
-    }
+      if (kdsId) {
+        // Pedido já existe no KDS: preservar status se está em 'preparing' ou 'ready'
+        // Só sincronizar status novamente se voltou para 'received' na SQL (contra-sincronização)
+        const lastKnownStatus = state.lastStatusByExternalId[externalId] || 'received';
 
-    processed += 1;
+        // Apenas atualizar se a SQL força voltar para 'received' (caso contrário, respeita KDS)
+        if (mappedStatus === 'received' && lastKnownStatus !== 'received') {
+          // SQL voltou para 'received': pode significar cancelamento, então sincroniza
+          const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
+          if (didUpdate) {
+            state.lastStatusByExternalId[externalId] = mappedStatus;
+            updated += 1;
+          }
+        } else if (mappedStatus !== lastKnownStatus && mappedStatus !== 'preparing' && mappedStatus !== 'ready') {
+          // Apenas sincroniza status de 'cancelled' ou outros status administrativos
+          const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
+          if (didUpdate) {
+            state.lastStatusByExternalId[externalId] = mappedStatus;
+            updated += 1;
+          }
+        }
+      }
+
+      if (!state.lastStatusByExternalId[externalId]) {
+        state.lastStatusByExternalId[externalId] = mappedStatus;
+      }
+
+      processed += 1;
+    } catch (error) {
+      const message = String(error?.message || error || '');
+      if (isPermanentOrderError(message)) {
+        state.blockedExternalIds[externalId] = {
+          blockedAt: new Date().toISOString(),
+          lastUpdatedAt: updatedAt.toISOString(),
+          reason: message.slice(0, 500),
+        };
+        skipped += 1;
+        console.warn(`[sql2014-bridge] pedido bloqueado para evitar replay: externalId=${externalId} reason=${message}`);
+        continue;
+      }
+      throw error;
+    }
   }
 
-  state.lastSyncAt = maxSyncDate.toISOString();
+  state.lastSyncAt = buildNextLastSyncAt(maxSyncDate);
   await saveState(state);
 
   return {

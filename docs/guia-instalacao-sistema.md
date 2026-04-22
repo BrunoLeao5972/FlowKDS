@@ -156,6 +156,7 @@ SQL2014_ENCRYPT=false
 SQL2014_TRUST_CERT=true
 SQL2014_POLL_INTERVAL_MS=3000
 SQL2014_INITIAL_SYNC_AT=2026-03-28T00:00:00.000Z
+SQL2014_START_FROM_NOW=true
 SQL2014_STATE_FILE=.sql2014-bridge-state.json
 SQL2014_QUERY_FILE=./sql2014-gerencialbrunoinfo-query.sql
 SQL2014_STATUS_MODE=parity
@@ -164,6 +165,8 @@ KDS_API_BASE=http://127.0.0.1:8081
 KDS_AUTH_USERNAME=Admin
 KDS_AUTH_PASSWORD=masterkey
 ```
+
+`SQL2014_START_FROM_NOW=true` faz o bridge iniciar pelo horario atual quando o arquivo de estado ainda nao existe, evitando reimportar historico antigo.
 
 ### Trocar apenas o banco consultado
 

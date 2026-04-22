@@ -7,6 +7,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/spec
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-04-22
+
+### Corrigido
+- Bridge SQL: proteção anti-replay ao reiniciar com banco zerado — `lastSyncAt` é forçado para o momento atual quando `idMap` está vazio, impedindo reimportação de pedidos históricos.
+- Bridge SQL: pedidos removidos do MongoDB não ressurgem mais — ao detectar UUID divergente no `idMap`, o novo pedido é deletado imediatamente e o `externalId` bloqueado (`stale_mapping_resurrection_blocked`).
+- Permissão de relatórios (`reports`) agora é corretamente verificada em todas as camadas: backend retorna 403 quando não autorizado, menu e painel são ocultados no frontend.
+
+### Segurança
+- Senha mínima reduzida de 6 para 4 caracteres (backend e frontend).
+- Nome de usuário `admin` (qualquer capitalização) agora é reservado — tentativa de criação ou edição retorna erro `username_reserved`.
+
+### Infra
+- `release/start-bridge.cmd` agora prefere executar o script JS diretamente (`node sql2014-kds-bridge.js`) antes de cair no binário `.exe`, garantindo que correções recentes sejam sempre aplicadas.
+
 ## [2.0.2] - 2026-04-16
 
 ### Adicionado

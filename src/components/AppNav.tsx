@@ -58,6 +58,8 @@ export function AppNav() {
     setPrintScale,
     enabledServiceModes,
     setEnabledServiceModes,
+    panelEnabledServiceModes,
+    setPanelEnabledServiceModes,
     panelColor,
     setPanelColor,
   } = useSettings();
@@ -94,6 +96,7 @@ export function AppNav() {
     printSize: '58mm' | '80mm' | 'A4';
     printScale: number;
     enabledServiceModes: string[];
+    panelEnabledServiceModes: string[];
     panelColor: string;
     animationsEnabled: boolean;
   }) => {
@@ -199,6 +202,7 @@ export function AppNav() {
             printSize,
             printScale,
             serviceModes,
+            panelServiceModes,
             panelColorParam
           ) => {
             setTempoMedio(medio);
@@ -241,6 +245,7 @@ export function AppNav() {
               printSize,
               printScale,
               enabledServiceModes: serviceModes,
+              panelEnabledServiceModes: panelServiceModes,
               panelColor: panelColorParam,
               animationsEnabled: true,
             });
@@ -255,6 +260,7 @@ export function AppNav() {
             setPrintSize(printSize);
             setPrintScale(115);
             setEnabledServiceModes(serviceModes);
+            setPanelEnabledServiceModes(panelServiceModes);
             setPanelColor(panelColorParam);
             // if user enabled daily-reset or custom-start, update last reset date to today so numbering starts immediately
             if (orderMode === 'daily-reset' || orderMode === 'custom-start') touchResetDate();
@@ -262,6 +268,7 @@ export function AppNav() {
           }}
           ThemeToggle={<ThemeToggle />}
           enabledServiceModes={enabledServiceModes}
+          panelEnabledServiceModes={panelEnabledServiceModes}
         />
       )}
     </>

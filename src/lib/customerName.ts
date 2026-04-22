@@ -22,3 +22,64 @@ export function getPanelCustomerName(customerName?: string) {
 export function getPrintableCustomerName(customerName?: string) {
   return isAnonymousCustomerName(customerName) ? 'Cliente não cadastrado' : String(customerName).trim();
 }
+
+function isMesaOuCartao(serviceMode?: string | null) {
+  const normalized = String(serviceMode || '').trim().toLowerCase();
+  return normalized === 'mesa' || normalized === 'cartao';
+}
+
+export function getResponsibleDisplayName(options: {
+  serviceMode?: string | null;
+  attendant?: string | null;
+  sellerName?: string | null;
+}) {
+  const serviceMode = String(options.serviceMode || '').trim().toLowerCase();
+  const attendant = String(options.attendant || '').trim();
+  const sellerName = String(options.sellerName || '').trim();
+
+  if (serviceMode === 'mesa') {
+    return sellerName || (attendant ? `Mesa ${attendant}` : '');
+  }
+
+  if (serviceMode === 'cartao') {
+    return sellerName || (attendant ? `Cartão ${attendant}` : '');
+  }
+
+  if (serviceMode === 'apartamento') {
+    return sellerName || (attendant ? `Apto ${attendant}` : '');
+  }
+
+  if (serviceMode === 'servico') {
+    return attendant ? `Serviço ${attendant}` : '';
+  }
+
+  if (serviceMode === 'balcao' || serviceMode === 'delivery' || serviceMode === 'encomenda') {
+    return attendant ? `Atendente: ${attendant}` : '';
+  }
+
+  return sellerName || attendant;
+}
+
+export function getPrintableTicketIdentity(options: {
+  customerName?: string | null;
+  serviceMode?: string | null;
+  attendant?: string | null;
+  sellerName?: string | null;
+}) {
+  const customerName = getPrintableCustomerName(options.customerName || '');
+
+  if (isMesaOuCartao(options.serviceMode)) {
+    const responsibleName = getResponsibleDisplayName(options);
+    if (responsibleName) {
+      return {
+        label: 'Responsável',
+        name: responsibleName,
+      };
+    }
+  }
+
+  return {
+    label: 'Cliente',
+    name: customerName,
+  };
+}

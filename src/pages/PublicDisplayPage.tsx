@@ -1,15 +1,40 @@
 import { useOrders } from '@/contexts/OrderContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useState, useEffect } from 'react';
+import { useSettings, ServiceMode } from '@/contexts/SettingsContext';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell } from 'lucide-react';
 import { getDisplayCustomerName, getPanelCustomerName } from '@/lib/customerName';
 
 const RECENT_WINDOW_HOURS = 3;
 const SECRET_THEME_CODE = '190';
+const ALL_SERVICE_MODES: ServiceMode[] = ['balcao', 'mesa', 'cartao', 'delivery', 'encomenda', 'servico', 'apartamento'];
 
 function isWithinLastHours(date: Date, hours: number): boolean {
   return Date.now() - date.getTime() <= hours * 60 * 60 * 1000;
+}
+
+function normalizeServiceMode(value: unknown): ServiceMode | null {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const aliases: Record<string, ServiceMode> = {
+    balcao: 'balcao',
+    balcon: 'balcao',
+    mesa: 'mesa',
+    cartao: 'cartao',
+    delivery: 'delivery',
+    entrega: 'delivery',
+    encomenda: 'encomenda',
+    servico: 'servico',
+    apartamento: 'apartamento',
+  };
+
+  return aliases[normalized] || null;
 }
 
 /**
@@ -72,6 +97,7 @@ function OrderCard({ order, variant }: OrderCardProps) {
 function PublicDisplayContent() {
   const { orders } = useOrders();
   const { isDarkMode, toggleDarkMode } = useTheme();
+  const settings = useSettings();
   const [, setTick] = useState(0);
   const [secretBuffer, setSecretBuffer] = useState('');
   const [showModeFeedback, setShowModeFeedback] = useState(false);
@@ -109,8 +135,20 @@ function PublicDisplayContent() {
     return () => window.clearTimeout(timeout);
   }, [showModeFeedback]);
 
-  // Filtra pedidos que devem aparecer no painel (exclui mesa e cartão)
-  const isDisplayMode = (mode?: string) => mode !== 'mesa' && mode !== 'cartao';
+  const normalizedPanelModes = useMemo(() => {
+    const configured = (settings.panelEnabledServiceModes || [])
+      .map(mode => normalizeServiceMode(mode))
+      .filter((mode): mode is ServiceMode => !!mode);
+
+    return configured.length ? configured : ['balcao', 'delivery', 'encomenda'];
+  }, [settings.panelEnabledServiceModes]);
+
+  const isDisplayMode = (mode?: string | null) => {
+    const normalizedMode = normalizeServiceMode(mode);
+    if (!normalizedMode) return true;
+    const effectiveModes = normalizedPanelModes.length ? normalizedPanelModes : ALL_SERVICE_MODES;
+    return effectiveModes.includes(normalizedMode);
+  };
 
   const preparingOrders = orders
     .filter(o => o.status === 'preparing' && isDisplayMode(o.serviceMode) && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))

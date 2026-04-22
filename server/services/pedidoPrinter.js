@@ -35,8 +35,54 @@ function obterNomeClienteParaImpressao(customerName) {
     : String(customerName).trim();
 }
 
-function gerarConteudoPedido(numeroPedido, customerName = '', dataHora = new Date(), tradeName = '') {
+function isMesaOuCartao(serviceMode) {
+  const normalized = String(serviceMode || '').trim().toLowerCase();
+  return normalized === 'mesa' || normalized === 'cartao';
+}
+
+function obterNomeResponsavel(options = {}) {
+  const serviceMode = String(options.serviceMode || '').trim().toLowerCase();
+  const attendant = String(options.attendant || '').trim();
+  const sellerName = String(options.sellerName || '').trim();
+
+  if (serviceMode === 'mesa') {
+    return sellerName || (attendant ? `Mesa ${attendant}` : '');
+  }
+
+  if (serviceMode === 'cartao') {
+    return sellerName || (attendant ? `Cartao ${attendant}` : '');
+  }
+
+  return sellerName || attendant;
+}
+
+function obterIdentificacaoParaImpressao(options = {}) {
+  const customerName = obterNomeClienteParaImpressao(options.customerName || '');
+
+  if (isMesaOuCartao(options.serviceMode)) {
+    const responsibleName = obterNomeResponsavel(options);
+    if (responsibleName) {
+      return {
+        label: 'RESPONSAVEL',
+        name: responsibleName,
+      };
+    }
+  }
+
+  return {
+    label: 'CLIENTE',
+    name: customerName,
+  };
+}
+
+function gerarConteudoPedido(numeroPedido, customerName = '', dataHora = new Date(), tradeName = '', options = {}) {
   const separador = '__________________________';
+  const identification = obterIdentificacaoParaImpressao({
+    customerName,
+    serviceMode: options.serviceMode,
+    attendant: options.attendant,
+    sellerName: options.sellerName,
+  });
   const lines = [];
   if (tradeName && String(tradeName).trim()) {
     lines.push(String(tradeName).trim());
@@ -44,7 +90,7 @@ function gerarConteudoPedido(numeroPedido, customerName = '', dataHora = new Dat
   lines.push(
     separador,
     `PEDIDO N\u00ba: ${numeroPedido}`,
-    `CLIENTE: ${obterNomeClienteParaImpressao(customerName)}`,
+    `${identification.label}: ${identification.name}`,
     `DATA: ${formatarDataHora(dataHora)}`,
     separador,
     'solucaosistemas.net'
@@ -61,6 +107,9 @@ function montarDadosTicket(numeroPedido, options = {}) {
     numeroPedido: Number(numeroPedido),
     tradeName: String(options.tradeName || '').trim(),
     customerName: obterNomeClienteParaImpressao(options.customerName || ''),
+    serviceMode: String(options.serviceMode || '').trim().toLowerCase() || null,
+    attendant: String(options.attendant || '').trim(),
+    sellerName: String(options.sellerName || '').trim(),
     dataHora: formatarDataHora(options.dataHora || new Date()),
     printSize,
     printScale,
@@ -79,7 +128,12 @@ function gerarConteudoPedidoTexto(ticket) {
     ticket.numeroPedido,
     ticket.customerName,
     new Date(),
-    ticket.tradeName
+    ticket.tradeName,
+    {
+      serviceMode: ticket.serviceMode,
+      attendant: ticket.attendant,
+      sellerName: ticket.sellerName,
+    }
   );
 }
 
@@ -297,11 +351,18 @@ if (-not $ok) { throw 'Falha no envio RAW para a impressora.' }
 }
 
 async function imprimirDiretoGdi(ticket, nomeImpressora) {
+  const identification = obterIdentificacaoParaImpressao({
+    customerName: ticket?.customerName,
+    serviceMode: ticket?.serviceMode,
+    attendant: ticket?.attendant,
+    sellerName: ticket?.sellerName,
+  });
   const printerEscaped = escapePowerShellSingleQuote(nomeImpressora);
   const payload = {
     numeroPedido: normalizarParaAscii(String(ticket?.numeroPedido || '')),
     tradeName: normalizarParaAscii(String(ticket?.tradeName || '')),
-    customerName: normalizarParaAscii(String(ticket?.customerName || '')),
+    identificationLabel: normalizarParaAscii(String(identification?.label || 'CLIENTE')),
+    identificationName: normalizarParaAscii(String(identification?.name || 'Cliente nao cadastrado')),
     dataHora: normalizarParaAscii(String(ticket?.dataHora || '')),
     printSize: String(ticket?.printSize || '80mm').toLowerCase(),
     printScale: FIXED_PRINT_SCALE,
@@ -365,7 +426,7 @@ $doc.add_PrintPage({
   $e.Graphics.DrawLine([System.Drawing.Pens]::Black, $x, $y, $x + $width, $y)
   $y += (6 * $scale)
 
-  $e.Graphics.DrawString(('Cliente: ' + [string]$ticket.customerName), $fontInfo, $black, $x, $y)
+  $e.Graphics.DrawString(([string]$ticket.identificationLabel + ': ' + [string]$ticket.identificationName), $fontInfo, $black, $x, $y)
   $y += [float]$fontInfo.GetHeight($e.Graphics) + (2 * $scale)
   $e.Graphics.DrawString(('Data/Hora: ' + [string]$ticket.dataHora), $fontInfo, $black, $x, $y)
   $y += [float]$fontInfo.GetHeight($e.Graphics) + (4 * $scale)
@@ -495,7 +556,12 @@ async function gerarArquivoTxt(conteudo, numeroPedido, customOutputDir) {
 
 async function gerarHtml(numeroPedido, options, customOutputDir) {
   const tradeName    = String(options.tradeName   || '').trim();
-  const customerName = obterNomeClienteParaImpressao(options.customerName || '');
+  const identification = obterIdentificacaoParaImpressao({
+    customerName: options.customerName || '',
+    serviceMode: options.serviceMode || null,
+    attendant: options.attendant || null,
+    sellerName: options.sellerName || null,
+  });
   const items        = Array.isArray(options.items) ? options.items : [];
   const dataHora     = formatarDataHora(options.dataHora || new Date());
 
@@ -544,7 +610,7 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
     <div class="label-senha">Senha do Pedido</div>
     <div class="senha">${numeroPedido}</div>
     <hr class="divider" />
-    <div class="info-line"><strong>Cliente:</strong> ${esc(customerName)}</div>
+    <div class="info-line"><strong>${esc(identification.label)}:</strong> ${esc(identification.name)}</div>
     <div class="info-line"><strong>Data/Hora:</strong> ${esc(dataHora)}</div>
     ${itemsHtml ? `<div class="items-title">Itens</div>\n    ${itemsHtml}` : ''}
     <hr class="divider" />
@@ -588,6 +654,9 @@ async function printPedido(numeroPedido, nomeImpressora, modoSaida, options = {}
 
   const ticket = montarDadosTicket(pedido, {
     customerName: options.customerName || '',
+    serviceMode: options.serviceMode || null,
+    attendant: options.attendant || null,
+    sellerName: options.sellerName || null,
     tradeName: options.tradeName || '',
     items: Array.isArray(options.items) ? options.items : [],
     printSize: options.printSize || '80mm',
@@ -604,6 +673,9 @@ async function printPedido(numeroPedido, nomeImpressora, modoSaida, options = {}
   return gerarHtml(pedido, {
     tradeName: ticket.tradeName,
     customerName: ticket.customerName,
+    serviceMode: ticket.serviceMode,
+    attendant: ticket.attendant,
+    sellerName: ticket.sellerName,
     items: ticket.items,
     dataHora: new Date(),
   }, options.outputDir);

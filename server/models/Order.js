@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const orderItemSchema = new mongoose.Schema(
   {
     id: { type: String, required: true },
+    sourceItemKey: { type: String, default: null },
     name: { type: String, required: true },
     quantity: { type: Number, required: true, min: 1, default: 1 },
     notes: { type: String, default: '' },
@@ -32,6 +33,8 @@ const orderSchema = new mongoose.Schema(
       index: true,
     },
     attendant: { type: String, default: null },
+    integratorId: { type: String, default: null, index: true },
+    integratorName: { type: String, default: null },
     sellerName: { type: String, default: null },
     observations: { type: String, default: '' },
     status: {

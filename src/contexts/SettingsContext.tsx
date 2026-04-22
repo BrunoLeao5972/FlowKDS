@@ -33,6 +33,7 @@ type Settings = {
   customStartNumber: number;
   lastResetDate: string | null; // ISO date (YYYY-MM-DD)
   enabledServiceModes: ServiceMode[];
+  panelEnabledServiceModes: ServiceMode[];
   setTempoMedio: (v: number) => void;
   setTempoAlerta: (v: number) => void;
   setTempoCritico: (v: number) => void;
@@ -56,6 +57,7 @@ type Settings = {
   setOrderNumberMode: (m: OrderNumberMode) => void;
   setCustomStartNumber: (n: number) => void;
   setEnabledServiceModes: (modes: ServiceMode[]) => void;
+  setPanelEnabledServiceModes: (modes: ServiceMode[]) => void;
   // panel color settings
   panelColor: string;
   setPanelColor: (color: string) => void;
@@ -96,6 +98,7 @@ const defaultValues: Settings = {
   customStartNumber: 100,
   lastResetDate: null,
   enabledServiceModes: [...ALL_SERVICE_MODES],
+  panelEnabledServiceModes: ['balcao', 'delivery', 'encomenda'],
   setTempoMedio: () => {},
   setTempoAlerta: () => {},
   setTempoCritico: () => {},
@@ -119,6 +122,7 @@ const defaultValues: Settings = {
   setOrderNumberMode: () => {},
   setCustomStartNumber: () => {},
   setEnabledServiceModes: () => {},
+  setPanelEnabledServiceModes: () => {},
   panelColor: '#FF6B35',
   setPanelColor: () => {},
   animationsEnabled: true,
@@ -168,6 +172,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [customStartNumber, setCustomStartNumber] = useState<number>(defaultValues.customStartNumber);
   const [lastResetDate, setLastResetDate] = useState<string | null>(defaultValues.lastResetDate);
   const [enabledServiceModes, setEnabledServiceModes] = useState<ServiceMode[]>(defaultValues.enabledServiceModes);
+  const [panelEnabledServiceModes, setPanelEnabledServiceModes] = useState<ServiceMode[]>(defaultValues.panelEnabledServiceModes);
   const [panelColor, setPanelColor] = useState<string>(defaultValues.panelColor);
   const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(true);
 
@@ -206,6 +211,12 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
             .map((mode: unknown) => String(mode || '').trim().toLowerCase())
             .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
           setEnabledServiceModes(normalizedModes.length ? [...new Set(normalizedModes)] : [...ALL_SERVICE_MODES]);
+        }
+        if (Array.isArray(parsed.panelEnabledServiceModes)) {
+          const normalizedPanelModes = parsed.panelEnabledServiceModes
+            .map((mode: unknown) => String(mode || '').trim().toLowerCase())
+            .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
+          setPanelEnabledServiceModes(normalizedPanelModes.length ? [...new Set(normalizedPanelModes)] : [...defaultValues.panelEnabledServiceModes]);
         }
         if (parsed.newOrderSound) setNewOrderSound(parsed.newOrderSound);
         if (parsed.readyOrderSound) setReadyOrderSound(parsed.readyOrderSound);
@@ -268,6 +279,12 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
             .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
           setEnabledServiceModes(normalizedModes.length ? [...new Set(normalizedModes)] : [...ALL_SERVICE_MODES]);
         }
+        if (Array.isArray(data.panelEnabledServiceModes)) {
+          const normalizedPanelModes = data.panelEnabledServiceModes
+            .map((mode: unknown) => String(mode || '').trim().toLowerCase())
+            .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
+          setPanelEnabledServiceModes(normalizedPanelModes.length ? [...new Set(normalizedPanelModes)] : [...defaultValues.panelEnabledServiceModes]);
+        }
       } catch (error) {
         // ignore to keep app usable offline
       }
@@ -296,6 +313,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
       customStartNumber,
       lastResetDate,
       enabledServiceModes,
+      panelEnabledServiceModes,
       newOrderSound,
       readyOrderSound,
       newOrderSoundEnabled,
@@ -326,6 +344,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     customStartNumber,
     lastResetDate,
     enabledServiceModes,
+    panelEnabledServiceModes,
     newOrderSound,
     readyOrderSound,
     newOrderSoundEnabled,
@@ -408,6 +427,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         customStartNumber,
         lastResetDate,
         enabledServiceModes,
+        panelEnabledServiceModes,
         setTempoMedio,
         setTempoAlerta,
         setTempoCritico,
@@ -424,6 +444,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         setOrderNumberMode,
         setCustomStartNumber,
         setEnabledServiceModes,
+        setPanelEnabledServiceModes,
         panelColor,
         setPanelColor,
         animationsEnabled,

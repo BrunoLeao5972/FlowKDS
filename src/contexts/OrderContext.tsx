@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { Order, OrderStatus, Sector, ItemStatus, ServiceMode } from '@/types/order';
 import { useSettings } from './SettingsContext';
 import { useAuth } from './AuthContext';
-import { getDisplayCustomerName, getPrintableCustomerName } from '@/lib/customerName';
+import { getDisplayCustomerName, getPrintableTicketIdentity } from '@/lib/customerName';
 
 interface OrderContextType {
   orders: Order[];
@@ -51,8 +51,17 @@ const normalizeServiceMode = (value: unknown): ServiceMode | null => {
 
 const getOrderIdentityKey = (order: Partial<Order> & { id?: string | null; externalId?: string | null }) => {
   const externalId = String(order.externalId || '').trim();
+  if (externalId.includes('::')) {
+    const baseExternalId = externalId.split('::')[0].trim();
+    if (baseExternalId) return `legacy-external:${baseExternalId}`;
+  }
+
+  const id = String(order.id || '').trim();
+  if (id) return `id:${id}`;
   if (externalId) return `external:${externalId}`;
-  return `id:${String(order.id || '').trim()}`;
+  const number = Number(order.number || 0);
+  const createdAt = order.createdAt instanceof Date ? order.createdAt.toISOString() : String(order.createdAt || '');
+  return `fallback:${number}:${createdAt}`;
 };
 
 const sortOrdersByCreatedAt = (orders: Order[]) => [...orders].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
@@ -79,8 +88,8 @@ const replaceOrderByIdentity = (orders: Order[], nextOrder: Order) => {
   ]);
 };
 
-// Pedidos de mesa e cartão não geram ticket de balcão/cozinha.
-const shouldPrintTicket = (order: Pick<Order, 'serviceMode'>): boolean => {
+// Pedidos de mesa e cartão não geram ticket automático de balcão/cozinha.
+const shouldAutoPrintTicket = (order: Pick<Order, 'serviceMode'>): boolean => {
   const mode = normalizeServiceMode(order.serviceMode);
   return mode !== 'mesa' && mode !== 'cartao';
 };
@@ -159,7 +168,12 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   const buildTicketHtml = useCallback((order: Order, resolvedPrinterName: string) => {
     const createdAt = new Date(order.createdAt);
     const dateText = createdAt.toLocaleString('pt-BR');
-    const customerName = getPrintableCustomerName(order.customerName);
+    const printableIdentity = getPrintableTicketIdentity({
+      customerName: order.customerName,
+      serviceMode: order.serviceMode,
+      attendant: order.attendant,
+      sellerName: order.sellerName,
+    });
     const ticketWidth = settings.printSize === '58mm' ? 220 : settings.printSize === '80mm' ? 300 : 420;
     const tradeName = settings.restaurantTradeName ? String(settings.restaurantTradeName).trim() : '';
     return `<!DOCTYPE html>
@@ -190,7 +204,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       ${tradeName ? `<div class="trade-name">${tradeName}</div>` : ''}
       <div class="title">SENHA DO PEDIDO</div>
       <div class="senha">${order.number}</div>
-      <div class="line"><strong>Cliente:</strong> ${customerName}</div>
+      <div class="line"><strong>${printableIdentity.label}:</strong> ${printableIdentity.name}</div>
       <div class="line"><strong>Data/Hora:</strong> ${dateText}</div>
       <div class="items">
         ${order.items.map(item => `<div class="line">${item.quantity}x ${item.name}</div>`).join('') || '<div class="line">Sem itens</div>'}
@@ -203,7 +217,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [settings.printSize, settings.restaurantTradeName]);
 
   const printOrderTicket = useCallback(async (createdOrder: Order) => {
-    if (!shouldPrintTicket(createdOrder)) return;
+    if (!shouldAutoPrintTicket(createdOrder)) return;
 
     const resolved = resolvePrinterMode(settings.printerName || '');
     const mode = resolved.mode;
@@ -228,6 +242,9 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             printScale: settings.printScale,
             orderNumber: createdOrder.number,
             customerName: createdOrder.customerName,
+            serviceMode: createdOrder.serviceMode,
+            attendant: createdOrder.attendant,
+            sellerName: createdOrder.sellerName,
             tradeName: settings.restaurantTradeName || '',
             items: createdOrder.items,
           }),
@@ -249,6 +266,9 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           printScale: settings.printScale,
           orderNumber: createdOrder.number,
           customerName: createdOrder.customerName,
+          serviceMode: createdOrder.serviceMode,
+          attendant: createdOrder.attendant,
+          sellerName: createdOrder.sellerName,
           tradeName: settings.restaurantTradeName || '',
           items: createdOrder.items,
         }),
@@ -259,10 +279,36 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printScale, settings.printSize, settings.restaurantTradeName]);
 
   const reprintOrderTicket = useCallback(async (order: Order) => {
-    if (!shouldPrintTicket(order)) return;
-
     const resolved = resolvePrinterMode(settings.printerName || '');
+
+    let orderToPrint: Order = order;
     try {
+      const latestOrderResp = await fetch(`${API_BASE}/orders/${order.id}`, { headers: authHeaders });
+      if (latestOrderResp.status === 401) {
+        logout();
+        return;
+      }
+      if (latestOrderResp.ok) {
+        const latestOrder: Order = await latestOrderResp.json();
+        orderToPrint = {
+          ...latestOrder,
+          externalId: (latestOrder as any).externalId || null,
+          customerName: getDisplayCustomerName(latestOrder.customerName),
+          serviceMode: normalizeServiceMode((latestOrder as any).serviceMode ?? (latestOrder as any).modality ?? (latestOrder as any).tipoAtendimento),
+          cookId: latestOrder.cookId || null,
+          createdAt: new Date(latestOrder.createdAt),
+          updatedAt: new Date(latestOrder.updatedAt),
+          acceptedAt: latestOrder.acceptedAt ? new Date(latestOrder.acceptedAt) : undefined,
+          startedAt: latestOrder.startedAt ? new Date(latestOrder.startedAt) : undefined,
+          finishedAt: latestOrder.finishedAt ? new Date(latestOrder.finishedAt) : undefined,
+          prepareStartedAt: latestOrder.prepareStartedAt ? new Date(latestOrder.prepareStartedAt) : undefined,
+          readyAt: latestOrder.readyAt ? new Date(latestOrder.readyAt) : undefined,
+          deliveredAt: latestOrder.deliveredAt ? new Date(latestOrder.deliveredAt) : undefined,
+          cancelledAt: latestOrder.cancelledAt ? new Date(latestOrder.cancelledAt) : undefined,
+          cancelAcknowledgedAt: latestOrder.cancelAcknowledgedAt ? new Date(latestOrder.cancelAcknowledgedAt) : undefined,
+        } as Order;
+      }
+
       await fetch(`${API_BASE}/print/ticket`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders },
@@ -271,10 +317,13 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           printerName: resolved.printerName,
           printSize: settings.printSize,
           printScale: settings.printScale,
-          orderNumber: order.number,
-          customerName: order.customerName,
+          orderNumber: orderToPrint.number,
+          customerName: orderToPrint.customerName,
+          serviceMode: orderToPrint.serviceMode,
+          attendant: orderToPrint.attendant,
+          sellerName: orderToPrint.sellerName,
           tradeName: settings.restaurantTradeName || '',
-          items: order.items,
+          items: orderToPrint.items,
         }),
       });
     } catch (error) {

@@ -2,11 +2,9 @@
 cd /d %~dp0
 if not exist ".env" (
   if exist ".env.example" copy /Y ".env.example" ".env" >nul
-  echo [ERRO] Arquivo .env nao encontrado.
+  echo [AVISO] Arquivo .env nao encontrado.
   echo Foi criado um .env a partir do .env.example.
-  echo Edite o .env e configure MONGODB_URI, SQL2014_* e credenciais.
-  pause
-  exit /b 1
+  echo Revise credenciais e configuracoes quando necessario.
 )
 
 kds-server.exe

@@ -18,6 +18,9 @@ SELECT
   CAST(pp.Status AS VARCHAR(20)) AS itemStatus,
   CAST(l.Tipo AS VARCHAR(10)) AS serviceMode,
   CAST(l.Atendimento AS INT) AS attendantNumber,
+  CAST(pp.Item AS VARCHAR(20)) AS itemSequence,
+  CAST(l.Integradora AS VARCHAR(20)) AS integratorId,
+  NULLIF(LTRIM(RTRIM(ig.IntegradoraNome)), '') AS integratorName,
   NULLIF(LTRIM(RTRIM(f.Nome)), '') AS sellerName,
   CAST(
     CASE
@@ -36,6 +39,9 @@ INNER JOIN vwPedidosProdutos pp ON pp.LancamentoID = l.LancamentoID
 LEFT JOIN PEDIDOS p ON p.[Lançamento] = l.LancamentoID
 LEFT JOIN Clientes c ON c.[Código] = l.ClienteID
 LEFT JOIN Fornecedores f ON f.[Código] = p.[Vendedor]
+LEFT JOIN Integracao.Integradora ig ON ig.IntegradoraID = l.Integradora
+  AND ISNUMERIC(CAST(ig.Status AS VARCHAR(50))) = 1
+  AND ABS(CONVERT(BIGINT, ig.Status)) % 2 = 0
 LEFT JOIN vwProdutos vp ON vp.ProdutoID = pp.ProdutoID
 WHERE (
   COALESCE(pp.Edicao, pp.Inclusao) > @lastSyncAt

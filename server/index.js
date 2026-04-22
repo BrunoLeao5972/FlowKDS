@@ -34,7 +34,7 @@ const AUTH_RESET_CODE = process.env.AUTH_RESET_CODE || '';
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || `${AUTH_PASSWORD || 'kds'}-token-secret`;
 const AUTH_TOKEN_TTL_HOURS = Number(process.env.AUTH_TOKEN_TTL_HOURS || 12);
 const LEGACY_TENANT_ID = process.env.LEGACY_TENANT_ID || 'legacy';
-const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings'];
+const ALL_PERMISSIONS = ['admin', 'kitchen', 'display', 'settings', 'reports'];
 const PRINT_PEDIDO_AUTO_ENABLED = String(process.env.PRINT_PEDIDO_AUTO_ENABLED || 'false').trim().toLowerCase() === 'true';
 const PRINT_PEDIDO_MODO = String(process.env.PRINT_PEDIDO_MODO || 'IMPRESSORA').trim().toUpperCase();
 const PRINT_PEDIDO_IMPRESSORA = String(process.env.PRINT_PEDIDO_IMPRESSORA || '').trim();
@@ -360,6 +360,184 @@ function parseTimestamp(raw) {
   return undefined;
 }
 
+function normalizeStoredOrderItem(it) {
+  return {
+    id: crypto.randomUUID(),
+    sourceItemKey: (() => {
+      const rawSourceItemKey = it?.sourceItemKey ?? it?.sourceitemkey ?? it?.itemKey ?? it?.itemkey;
+      if (rawSourceItemKey === undefined || rawSourceItemKey === null || rawSourceItemKey === '') return null;
+      return String(rawSourceItemKey).trim();
+    })(),
+    name: String(it?.name || '').trim() || 'Item sem nome',
+    quantity: Number(it?.quantity) > 0 ? Number(it.quantity) : 1,
+    notes: String(it?.notes || '').trim(),
+    sectorId: (() => {
+      const rawSector = it?.sectorId ?? it?.sector ?? it?.setorId ?? it?.setorid ?? it?.setor;
+      if (rawSector === undefined || rawSector === null || rawSector === '') return null;
+      return String(rawSector).trim();
+    })(),
+    itemStatus: 'waiting',
+  };
+}
+
+function getComparableOrderItem(it) {
+  return {
+    name: String(it?.name || '').trim(),
+    quantity: Number(it?.quantity) > 0 ? Number(it.quantity) : 1,
+    notes: String(it?.notes || '').trim(),
+    sectorId: it?.sectorId ? String(it.sectorId).trim() : null,
+  };
+}
+
+function areComparableItemsEqual(left, right) {
+  return left.name === right.name
+    && left.quantity === right.quantity
+    && left.notes === right.notes
+    && left.sectorId === right.sectorId;
+}
+
+function comparableOrderItemKey(it) {
+  return JSON.stringify(it);
+}
+
+function buildStableCollisionSuffix(item) {
+  const comparable = comparableOrderItemKey(getComparableOrderItem(item));
+  return Buffer
+    .from(comparable)
+    .toString('base64')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 12)
+    || 'dup';
+}
+
+function mergeIncomingOrderItems(existingItems, incomingItems) {
+  const existingSourceKeys = new Set(
+    existingItems
+      .map(item => String(item?.sourceItemKey || '').trim())
+      .filter(Boolean)
+  );
+  const incomingWithSourceKey = incomingItems.filter(item => String(item?.sourceItemKey || '').trim());
+
+  if (incomingWithSourceKey.length > 0) {
+    const mergedItems = [...existingItems];
+    let appendedCount = 0;
+
+    for (const incomingItem of incomingItems) {
+      const sourceItemKey = String(incomingItem?.sourceItemKey || '').trim();
+      if (!sourceItemKey) continue;
+
+      if (existingSourceKeys.has(sourceItemKey)) {
+        const hasSameItemWithSameKey = mergedItems.some(existingItem => {
+          const existingSourceItemKey = String(existingItem?.sourceItemKey || '').trim();
+          if (existingSourceItemKey !== sourceItemKey) return false;
+          return areComparableItemsEqual(getComparableOrderItem(existingItem), getComparableOrderItem(incomingItem));
+        });
+
+        if (hasSameItemWithSameKey) {
+          continue;
+        }
+
+        // Alguns ambientes SQL reutilizam itemSequence na mesma comanda.
+        // Se a chave colidir mas o item for diferente, mantemos os dois para nao perder lancamento.
+        // O sufixo eh deterministico para evitar multiplicacao em novos ciclos de sync.
+        const dedupedSourceItemKey = `${sourceItemKey}#${buildStableCollisionSuffix(incomingItem)}`;
+        const alreadyMergedCollision = mergedItems.some(existingItem => {
+          const existingSourceItemKey = String(existingItem?.sourceItemKey || '').trim();
+          if (existingSourceItemKey !== dedupedSourceItemKey) return false;
+          return areComparableItemsEqual(getComparableOrderItem(existingItem), getComparableOrderItem(incomingItem));
+        });
+
+        if (alreadyMergedCollision) {
+          continue;
+        }
+
+        mergedItems.push({
+          ...incomingItem,
+          sourceItemKey: dedupedSourceItemKey,
+        });
+        existingSourceKeys.add(dedupedSourceItemKey);
+        appendedCount += 1;
+        continue;
+      }
+
+      const fallbackIndex = mergedItems.findIndex(existingItem => {
+        const existingSourceItemKey = String(existingItem?.sourceItemKey || '').trim();
+        if (existingSourceItemKey) return false;
+        return areComparableItemsEqual(getComparableOrderItem(existingItem), getComparableOrderItem(incomingItem));
+      });
+
+      if (fallbackIndex >= 0) {
+        mergedItems[fallbackIndex] = {
+          ...mergedItems[fallbackIndex],
+          sourceItemKey,
+        };
+        existingSourceKeys.add(sourceItemKey);
+        continue;
+      }
+
+      mergedItems.push(incomingItem);
+      existingSourceKeys.add(sourceItemKey);
+      appendedCount += 1;
+    }
+
+    const comparableMerged = mergedItems.map(getComparableOrderItem);
+    const remainingComparableCounts = new Map();
+    for (const comparableItem of comparableMerged) {
+      const key = comparableOrderItemKey(comparableItem);
+      remainingComparableCounts.set(key, Number(remainingComparableCounts.get(key) || 0) + 1);
+    }
+
+    for (const incomingItem of incomingItems) {
+      const sourceItemKey = String(incomingItem?.sourceItemKey || '').trim();
+      if (sourceItemKey) continue;
+
+      const comparableIncoming = getComparableOrderItem(incomingItem);
+      const key = comparableOrderItemKey(comparableIncoming);
+      const available = Number(remainingComparableCounts.get(key) || 0);
+
+      if (available > 0) {
+        remainingComparableCounts.set(key, available - 1);
+        continue;
+      }
+
+      mergedItems.push(incomingItem);
+      appendedCount += 1;
+    }
+
+    return { mergedItems, appendedCount };
+  }
+
+  const comparableExisting = existingItems.map(getComparableOrderItem);
+  const existingCountsByKey = new Map();
+  for (const comparableItem of comparableExisting) {
+    const key = comparableOrderItemKey(comparableItem);
+    existingCountsByKey.set(key, Number(existingCountsByKey.get(key) || 0) + 1);
+  }
+
+  const itemsToAppend = [];
+  for (const incomingItem of incomingItems) {
+    const comparableIncoming = getComparableOrderItem(incomingItem);
+    const key = comparableOrderItemKey(comparableIncoming);
+    const available = Number(existingCountsByKey.get(key) || 0);
+
+    if (available > 0) {
+      existingCountsByKey.set(key, available - 1);
+      continue;
+    }
+
+    itemsToAppend.push(incomingItem);
+  }
+
+  if (!itemsToAppend.length) {
+    return { mergedItems: existingItems, appendedCount: 0 };
+  }
+
+  return {
+    mergedItems: [...existingItems, ...itemsToAppend],
+    appendedCount: itemsToAppend.length,
+  };
+}
+
 function buildCreatedAtMatch(fromRaw, toRaw) {
   const from = parseTimestamp(fromRaw);
   const to = parseTimestamp(toRaw);
@@ -460,6 +638,9 @@ function normalizeRestaurantPayload(payload) {
     animationsEnabled: toSafeBoolean(raw.animationsEnabled, true),
     enabledServiceModes: Array.isArray(raw.enabledServiceModes) 
       ? raw.enabledServiceModes.map(m => String(m).trim()).filter(Boolean)
+      : [],
+    panelEnabledServiceModes: Array.isArray(raw.panelEnabledServiceModes)
+      ? raw.panelEnabledServiceModes.map(m => String(m).trim()).filter(Boolean)
       : [],
   };
 }
@@ -634,18 +815,22 @@ app.post('/users', authMiddleware, asyncHandler(async (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ error: 'username_and_password_required' });
   }
-  if (password.length < 6) {
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  if (normalizedUsername === 'admin') {
+    return res.status(400).json({ error: 'username_reserved' });
+  }
+  if (password.length < 4) {
     return res.status(400).json({ error: 'password_too_short' });
   }
 
-  const existingUser = await User.findOne({ tenantId: LEGACY_TENANT_ID, username: username.toLowerCase() }).lean();
+  const existingUser = await User.findOne({ tenantId: LEGACY_TENANT_ID, username: normalizedUsername }).lean();
   if (existingUser) {
     return res.status(409).json({ error: 'username_already_exists' });
   }
 
   const user = new User({
     tenantId: LEGACY_TENANT_ID,
-    username: username.toLowerCase(),
+    username: normalizedUsername,
     passwordHash: password,
     sectorIds: normalizeSectorIds(sectorIds),
   });
@@ -665,6 +850,9 @@ app.patch('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
     if (nextUsername.length < 3) {
       return res.status(400).json({ error: 'username_too_short' });
     }
+    if (nextUsername === 'admin') {
+      return res.status(400).json({ error: 'username_reserved' });
+    }
 
     if (nextUsername !== user.username) {
       const existingUser = await User.findOne({ tenantId: LEGACY_TENANT_ID, username: nextUsername, _id: { $ne: id } }).lean();
@@ -677,7 +865,7 @@ app.patch('/users/:id', authMiddleware, asyncHandler(async (req, res) => {
 
   if (password !== undefined && password !== null && String(password).trim() !== '') {
     const nextPassword = String(password);
-    if (nextPassword.length < 6) {
+    if (nextPassword.length < 4) {
       return res.status(400).json({ error: 'password_too_short' });
     }
     user.passwordHash = nextPassword;
@@ -724,6 +912,7 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
       panelColor: '#FF6B35',
       animationsEnabled: true,
       enabledServiceModes: [],
+      panelEnabledServiceModes: ['balcao', 'delivery', 'encomenda'],
       updatedAt: null,
       updatedBy: null,
     });
@@ -756,6 +945,7 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     panelColor: existing.panelColor || '#FF6B35',
     animationsEnabled: existing.animationsEnabled ?? true,
     enabledServiceModes: existing.enabledServiceModes || [],
+    panelEnabledServiceModes: existing.panelEnabledServiceModes || ['balcao', 'delivery', 'encomenda'],
     updatedAt: existing.updatedAt || null,
     updatedBy: existing.updatedBy || null,
   });
@@ -815,6 +1005,7 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     panelColor: saved.panelColor || '#FF6B35',
     animationsEnabled: saved.animationsEnabled ?? true,
     enabledServiceModes: saved.enabledServiceModes || [],
+    panelEnabledServiceModes: saved.panelEnabledServiceModes || ['balcao', 'delivery', 'encomenda'],
     updatedAt: saved.updatedAt || null,
     updatedBy: saved.updatedBy || null,
   });
@@ -837,6 +1028,9 @@ app.post('/print/ticket', authMiddleware, asyncHandler(async (req, res) => {
   const result = await printPedido(orderNumber, printerName, mode, {
     outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
     customerName: String(body.customerName || ''),
+    serviceMode: String(body.serviceMode || '').trim().toLowerCase() || null,
+    attendant: String(body.attendant || '').trim(),
+    sellerName: String(body.sellerName || '').trim(),
     tradeName: String(body.tradeName || ''),
     items: Array.isArray(body.items) ? body.items : [],
     printSize: String(body.printSize || '80mm'),
@@ -936,6 +1130,11 @@ app.get('/orders/:id', asyncHandler(async (req, res) => {
 }));
 
 app.get('/reports/operational', authMiddleware, asyncHandler(async (req, res) => {
+  const authPermissions = req.authUser?.permissions || [];
+  if (!authPermissions.includes('reports')) {
+    return res.status(403).json({ error: 'reports_permission_required' });
+  }
+
   const { match, error } = buildCreatedAtMatch(req.query.from, req.query.to);
   const scopedMatch = { ...match, tenantId: LEGACY_TENANT_ID };
   if (error) {
@@ -1478,6 +1677,9 @@ if (fs.existsSync(DIST)) {
 app.post('/orders', asyncHandler(async (req, res) => {
   const { number, customerName, items, observations, cookId, suppressAutoPrint, sellerName } = req.body;
   const attendant = String(req.body?.attendant || req.body?.waiter || req.body?.garcom || req.body?.atendente || '').trim() || null;
+  const integratorId = String(req.body?.integratorId || '').trim() || null;
+  const integratorName = String(req.body?.integratorName || '').trim() || null;
+  const sourceUpdatedAt = parseTimestamp(req.body?.sourceUpdatedAt ?? req.body?.updatedAt);
   const serviceMode = normalizeServiceMode(
     req.body?.serviceMode
     ?? req.body?.modalidade
@@ -1499,6 +1701,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
     }
   }
 
+  const normalizedIncomingItems = items.map(normalizeStoredOrderItem);
   const externalId = String(req.body?.externalid ?? req.body?.externalId ?? '').trim() || null;
   if (externalId) {
     const existingOrder = await Order.findOne({
@@ -1507,7 +1710,64 @@ app.post('/orders', asyncHandler(async (req, res) => {
     }).lean();
 
     if (existingOrder) {
-      return res.status(200).json(toISO(existingOrder));
+      const mergeResult = mergeIncomingOrderItems(existingOrder.items || [], normalizedIncomingItems);
+      const appendedItemsCount = mergeResult.appendedCount;
+      const metadataPatch = {
+        number,
+        customerName: customerName || '',
+        serviceMode,
+        attendant,
+        integratorId,
+        integratorName,
+        sellerName: sellerName || null,
+        observations: observations || '',
+      };
+      const metadataChanged = Object.entries(metadataPatch).some(([key, value]) => {
+        const currentValue = existingOrder[key];
+        return (currentValue ?? null) !== (value ?? null);
+      });
+      const itemsChanged = JSON.stringify(existingOrder.items || []) !== JSON.stringify(mergeResult.mergedItems);
+      const shouldReopenOrder = appendedItemsCount > 0 && ['ready', 'delivered', 'cancelled'].includes(existingOrder.status);
+      const shouldAdvanceSyncMarker = sourceUpdatedAt !== undefined
+        && sourceUpdatedAt !== null
+        && (existingOrder.lastSyncedAt == null || sourceUpdatedAt > existingOrder.lastSyncedAt);
+
+      if (!itemsChanged && !metadataChanged && !shouldAdvanceSyncMarker) {
+        return res.status(200).json(toISO(existingOrder));
+      }
+
+      const now = Date.now();
+      const patch = {
+        ...metadataPatch,
+        updatedAt: now,
+        syncVersion: Number(existingOrder.syncVersion || 1) + 1,
+        lastSyncedAt: shouldAdvanceSyncMarker ? sourceUpdatedAt : existingOrder.lastSyncedAt,
+      };
+
+      if (itemsChanged) {
+        patch.items = mergeResult.mergedItems;
+      }
+
+      if (shouldReopenOrder) {
+        patch.status = 'received';
+        patch.readyAt = null;
+        patch.deliveredAt = null;
+        patch.cancelledAt = null;
+        patch.cancelAcknowledgedAt = null;
+        patch.stageEvents = [
+          ...(existingOrder.stageEvents || []),
+          { status: 'received', at: now, cookId: existingOrder.cookId || null },
+        ];
+      }
+
+      const updatedOrder = await Order.findOneAndUpdate(
+        { tenantId: LEGACY_TENANT_ID, id: existingOrder.id },
+        patch,
+        { new: true, lean: true }
+      );
+
+      io.emit('orders:updated', toISO(updatedOrder));
+      return res.status(200).json(toISO(updatedOrder));
     }
   }
 
@@ -1521,6 +1781,8 @@ app.post('/orders', asyncHandler(async (req, res) => {
     customerName: customerName || '',
     serviceMode,
     attendant,
+    integratorId,
+    integratorName,
     sellerName: sellerName || null,
     observations: observations || '',
     status: 'received',
@@ -1537,27 +1799,18 @@ app.post('/orders', asyncHandler(async (req, res) => {
     cookId: cookId || null,
     startedAtHistory: [],
     stageEvents: [{ status: 'received', at: now, cookId: cookId || null }],
-    items: items.map(it => ({
-      id: crypto.randomUUID(),
-      name: it.name,
-      quantity: it.quantity || 1,
-      notes: it.notes || '',
-      sectorId: (() => {
-        const rawSector = it.sectorId ?? it.sector ?? it.setorId ?? it.setorid ?? it.setor;
-        if (rawSector === undefined || rawSector === null || rawSector === '') return null;
-        return String(rawSector).trim();
-      })(),
-      itemStatus: 'waiting',
-    }))
+    syncVersion: 1,
+    lastSyncedAt: sourceUpdatedAt ?? now,
+    items: normalizedIncomingItems,
   };
 
   await Order.create(order);
   res.status(201).json(toISO(order));
   io.emit('orders:created', toISO(order));
 
-  const isMesaOrder = serviceMode === 'mesa';
+  const isMesaOrCartaoOrder = serviceMode === 'mesa' || serviceMode === 'cartao';
 
-  if (PRINT_PEDIDO_AUTO_ENABLED && !suppressAutoPrint && !isMesaOrder) {
+  if (PRINT_PEDIDO_AUTO_ENABLED && !suppressAutoPrint && !isMesaOrCartaoOrder) {
     console.log(`[print-pedido] AUTO_ENABLED ativada - tentando imprimir pedido #${order.number}`);
     setImmediate(async () => {
       try {
@@ -1575,6 +1828,9 @@ app.post('/orders', asyncHandler(async (req, res) => {
           {
             outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
             customerName: order.customerName || '',
+            serviceMode: order.serviceMode || null,
+            attendant: order.attendant || null,
+            sellerName: order.sellerName || null,
             tradeName,
             items: order.items || [],
             printSize,
@@ -1600,8 +1856,8 @@ app.post('/orders', asyncHandler(async (req, res) => {
     });
   } else if (PRINT_PEDIDO_AUTO_ENABLED && suppressAutoPrint) {
     console.log(`[print-pedido] Impressao automatica ignorada no pedido #${order.number} (suppressAutoPrint=true)`);
-  } else if (PRINT_PEDIDO_AUTO_ENABLED && isMesaOrder) {
-    console.log(`[print-pedido] Impressao automatica ignorada no pedido #${order.number} (serviceMode=mesa)`);
+  } else if (PRINT_PEDIDO_AUTO_ENABLED && isMesaOrCartaoOrder) {
+    console.log(`[print-pedido] Impressao automatica ignorada no pedido #${order.number} (serviceMode=${serviceMode})`);
   }
 }));
 

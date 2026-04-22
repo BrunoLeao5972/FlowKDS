@@ -15,6 +15,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { APP_VERSION } from '@/lib/version';
 // import ThemeConfigPanel from './ThemeConfigPanel'; // ⭐ Desabilitado: usando apenas dark/light mode
@@ -53,12 +54,14 @@ interface ConfigDialogProps {
     printSize: '58mm' | '80mm' | 'A4',
     printScale: number,
     serviceModes: ServiceMode[],
+    panelServiceModes: ServiceMode[],
     panelColor: string
   ) => void;
   ThemeToggle: React.ReactNode;
   orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
   customStartNumber: number;
   enabledServiceModes: ServiceMode[];
+  panelEnabledServiceModes: ServiceMode[];
 }
 
 type ServiceMode = 'balcao' | 'mesa' | 'cartao' | 'delivery' | 'encomenda' | 'servico' | 'apartamento';
@@ -168,7 +171,7 @@ interface OperationalReportData {
   };
 }
 
-export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, panelColor, orderNumberMode, customStartNumber, enabledServiceModes, onSave, ThemeToggle }: ConfigDialogProps) {
+export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, panelColor, orderNumberMode, customStartNumber, enabledServiceModes, panelEnabledServiceModes, onSave, ThemeToggle }: ConfigDialogProps) {
   // Controla qual aba está ativa na navegação principal
   const [activeTab, setActiveTab] = useState<'restaurant' | 'users'>('restaurant');
 
@@ -208,6 +211,8 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
 
   const settings = useSettings();
   const { isDarkMode, toggleDarkMode } = useTheme();
+  const { hasPermission } = useAuth();
+  const canViewReports = hasPermission('reports');
 
   // Ref para o input de arquivo de licença (acionado programaticamente pelo botão)
   const licenseInputRef = useRef<HTMLInputElement | null>(null);
@@ -247,7 +252,11 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [selectedServiceModes, setSelectedServiceModes] = useState<ServiceMode[]>(
     Array.isArray(enabledServiceModes) && enabledServiceModes.length ? enabledServiceModes : SERVICE_MODE_OPTIONS.map(mode => mode.id)
   );
+  const [selectedPanelServiceModes, setSelectedPanelServiceModes] = useState<ServiceMode[]>(
+    Array.isArray(panelEnabledServiceModes) && panelEnabledServiceModes.length ? panelEnabledServiceModes : ['balcao', 'delivery', 'encomenda']
+  );
   const [serviceModeToAdd, setServiceModeToAdd] = useState('');
+  const [panelServiceModeToAdd, setPanelServiceModeToAdd] = useState('');
 
   // Estado para cor do painel
   const [panelColorLocal, setPanelColorLocal] = useState<string>(panelColor || '#FF6B35');
@@ -684,8 +693,12 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       setUserError('Nome de usuário e senha são obrigatórios');
       return;
     }
-    if (newPassword.length < 6) {
-      setUserError('Senha deve ter no mínimo 6 caracteres');
+    if (newUsername.trim().toLowerCase() === 'admin') {
+      setUserError('O nome de usuário Admin é reservado do sistema');
+      return;
+    }
+    if (newPassword.length < 4) {
+      setUserError('Senha deve ter no mínimo 4 caracteres');
       return;
     }
 
@@ -705,6 +718,8 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
         const error = await response.json();
         if (error.error === 'username_already_exists') {
           setUserError('Isso nome de usuário já existe');
+        } else if (error.error === 'username_reserved') {
+          setUserError('O nome de usuário Admin é reservado do sistema');
         } else if (error.error === 'password_too_short') {
           setUserError('Senha muito curta');
         } else {
@@ -855,8 +870,12 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       setUserError('Nome de usuário é obrigatório');
       return;
     }
-    if (editPassword && editPassword.length < 6) {
-      setUserError('Senha deve ter no mínimo 6 caracteres');
+    if (usernameTrimmed.toLowerCase() === 'admin') {
+      setUserError('O nome de usuário Admin é reservado do sistema');
+      return;
+    }
+    if (editPassword && editPassword.length < 4) {
+      setUserError('Senha deve ter no mínimo 4 caracteres');
       return;
     }
 
@@ -879,8 +898,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
         const error = await response.json().catch(() => ({}));
         if (error.error === 'username_already_exists') {
           setUserError('Esse nome de usuário já existe');
+        } else if (error.error === 'username_reserved') {
+          setUserError('O nome de usuário Admin é reservado do sistema');
         } else if (error.error === 'password_too_short') {
-          setUserError('Senha deve ter no mínimo 6 caracteres');
+          setUserError('Senha deve ter no mínimo 4 caracteres');
         } else {
           setUserError('Erro ao editar usuário');
         }
@@ -1003,6 +1024,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       printSize,
       115,
       selectedServiceModes,
+      selectedPanelServiceModes,
       panelColorLocal
     );
   };
@@ -1024,6 +1046,18 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     setSelectedServiceModes(prev => prev.filter(item => item !== mode));
   };
 
+  const handleAddPanelServiceMode = () => {
+    const mode = String(panelServiceModeToAdd || '').trim().toLowerCase() as ServiceMode;
+    if (!mode) return;
+    if (selectedPanelServiceModes.includes(mode)) return;
+    setSelectedPanelServiceModes(prev => [...prev, mode]);
+    setPanelServiceModeToAdd('');
+  };
+
+  const handleRemovePanelServiceMode = (mode: ServiceMode) => {
+    setSelectedPanelServiceModes(prev => prev.filter(item => item !== mode));
+  };
+
   // Função helpers para resetar painéis
   const resetPanels = () => {
     setShowUsersPanel(false);
@@ -1041,7 +1075,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     { id: 'users', label: '👥 Usuários', panel: 'users' },
     { id: 'permissions', label: '🔐 Permissões', panel: 'permissions' },
     { id: 'modes', label: '📦 Modalidades', panel: 'modes' },
-    { id: 'reports', label: '📊 Relatórios', panel: 'reports' },
+    ...(canViewReports ? [{ id: 'reports', label: '📊 Relatórios', panel: 'reports' }] : []),
     { id: 'theme', label: '🌓 Tema', panel: 'theme' },
     { id: 'support', label: '❓ Suporte', panel: 'support' },
   ];
@@ -1385,7 +1419,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
             </div>
           )}
 
-          {/* TAB: MODALIDADES (com sub-abas para Modalidades e Setores) */}
+          {/* TAB: MODALIDADES (cozinha) */}
           {showServiceModesPanel && (
             <div className="space-y-3">
               {/* Sub-abas de navegação */}
@@ -1468,6 +1502,63 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                   </div>
 
                   <p className="text-[11px] text-muted-foreground">Use este filtro para aceitar no KDS apenas pedidos das modalidades selecionadas.</p>
+
+                  {/* Modalidades habilitadas no Painel de Retirada */}
+                  <div className="mt-4 pt-4 border-t border-border space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-base">Visualização no painel</h3>
+                      <p className="text-sm text-muted-foreground">Escolha quais modalidades aparecem na tela de retirada.</p>
+                    </div>
+
+                    <div className="rounded-md border border-border bg-background p-3 space-y-2">
+                      <p className="text-xs font-medium">Modalidades habilitadas no painel:</p>
+
+                      <div className="flex gap-2">
+                        <select
+                          className="input h-8 text-xs flex-1"
+                          value={panelServiceModeToAdd}
+                          onChange={e => setPanelServiceModeToAdd(e.target.value)}
+                        >
+                          <option value="">Selecione uma modalidade...</option>
+                          {SERVICE_MODE_OPTIONS
+                            .filter(mode => !selectedPanelServiceModes.includes(mode.id))
+                            .map(mode => (
+                              <option key={mode.id} value={mode.id}>{mode.label}</option>
+                            ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleAddPanelServiceMode}
+                          disabled={!panelServiceModeToAdd}
+                          className="h-8 px-2 rounded-md border border-orange-300 text-orange-700 text-xs font-semibold disabled:opacity-50"
+                        >
+                          Adicionar
+                        </button>
+                      </div>
+
+                      <div className="min-h-8 flex flex-wrap gap-1">
+                        {selectedPanelServiceModes.length === 0 ? (
+                          <span className="text-[11px] text-muted-foreground">Nenhuma modalidade habilitada.</span>
+                        ) : (
+                          selectedPanelServiceModes.map(mode => (
+                            <span key={mode} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-xs font-medium">
+                              {getServiceModeLabel(mode)}
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePanelServiceMode(mode)}
+                                className="text-orange-700 hover:text-orange-900"
+                                title="Remover modalidade"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-muted-foreground">Esse filtro afeta apenas a tela de retirada, sem interferir nas modalidades aceitas na cozinha.</p>
+                  </div>
                 </div>
               )}
 
@@ -1545,7 +1636,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
           )}
 
           {/* TAB: RELATÓRIOS */}
-          {showReportsPanel && (
+          {showReportsPanel && canViewReports && (
             <div className="space-y-4">
               <div className="rounded-xl border border-orange-200/80 dark:border-orange-800/40 bg-gradient-to-br from-orange-50/80 to-amber-50/50 dark:from-orange-950/30 dark:to-amber-950/20 p-4">
                 <div className="flex flex-col gap-4">

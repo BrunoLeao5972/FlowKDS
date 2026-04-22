@@ -26,6 +26,8 @@ export interface Order {
   serviceMode?: ServiceMode | null;
   cookId?: string | null;
   attendant?: string | null;
+  integratorId?: string | null;
+  integratorName?: string | null;
   sellerName?: string | null;
   items: OrderItem[];
   observations: string;
