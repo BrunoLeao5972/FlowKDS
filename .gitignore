@@ -27,6 +27,9 @@ dist-ssr
 server/kds.json
 server/scripts/.sql2014-bridge.pid
 server/scripts/.sql2014-bridge-state.json
+release/scripts/.sql2014-bridge-state.json
+release.zip
+public/fox not found.mp4
 dist-electron/
 *.rar
 *.exe
