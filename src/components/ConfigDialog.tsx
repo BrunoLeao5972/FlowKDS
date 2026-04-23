@@ -94,6 +94,15 @@ interface SectorData {
   isActive?: boolean;
 }
 
+type RequiredRestaurantField =
+  | 'restaurantTradeName'
+  | 'restaurantLegalName'
+  | 'restaurantCnpj'
+  | 'restaurantStreet'
+  | 'restaurantNumber'
+  | 'restaurantCity'
+  | 'restaurantCep';
+
 const BUILTIN_SONG_OPTIONS = [
   {
     value: '/Songs/Efeito Sonoro - Chegou Pedido.mp3',
@@ -231,6 +240,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
 
   // Mensagem de erro de validação exibida na aba Restaurante
   const [restaurantError, setRestaurantError] = useState('');
+  const [missingRestaurantField, setMissingRestaurantField] = useState<RequiredRestaurantField | null>(null);
 
   // Licença do sistema: nome do arquivo e conteúdo bruto (texto)
   const [licenseFileName, setLicenseFileName] = useState<string | null>(settings.licenseFileName || null);
@@ -1078,8 +1088,36 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     const cnpjDigits = restaurantCnpj.replace(/\D/g, '');
     const cepDigits = restaurantCep.replace(/\D/g, '');
 
+    const requiredFields = [
+      { key: 'restaurantTradeName', label: 'Nome fantasia', value: restaurantTradeName },
+      { key: 'restaurantLegalName', label: 'Razão social', value: restaurantLegalName },
+      { key: 'restaurantCnpj', label: 'CNPJ', value: restaurantCnpj },
+      { key: 'restaurantStreet', label: 'Endereço', value: restaurantStreet },
+      { key: 'restaurantNumber', label: 'Número', value: restaurantNumber },
+      { key: 'restaurantCity', label: 'Cidade/UF', value: restaurantCity },
+    ];
+
+    const missingField = requiredFields.find(field => !String(field.value || '').trim());
+    if (missingField) {
+      setRestaurantError(`Preencha o campo "${missingField.label}" para salvar o cadastro.`);
+      setMissingRestaurantField(missingField.key as RequiredRestaurantField);
+      setActiveTab('restaurant');
+      setShowUsersPanel(false);
+      setShowPermissionsPanel(false);
+      setShowServiceModesPanel(false);
+      setShowReportsPanel(false);
+      setShowSupportPanel(false);
+      window.setTimeout(() => {
+        const input = document.getElementById(`restaurant-${missingField.key}`) as HTMLInputElement | null;
+        input?.focus();
+        input?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 0);
+      return;
+    }
+
     if (cnpjDigits.length !== 14) {
       setRestaurantError('CNPJ deve conter 14 dígitos.');
+      setMissingRestaurantField('restaurantCnpj');
       setActiveTab('restaurant');
       setShowUsersPanel(false);
       setShowPermissionsPanel(false);
@@ -1092,6 +1130,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
 
     if (restaurantCep.trim().length > 0 && cepDigits.length !== 8) {
       setRestaurantError('CEP inválido. Use o formato 00000-000.');
+      setMissingRestaurantField('restaurantCep');
       setActiveTab('restaurant');
       setShowUsersPanel(false);
       setShowPermissionsPanel(false);
@@ -1104,6 +1143,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
 
     if (selectedServiceModes.length === 0) {
       setRestaurantError('Selecione pelo menos uma modalidade para usar no KDS.');
+      setMissingRestaurantField(null);
       setShowUsersPanel(false);
       setShowPermissionsPanel(false);
       setShowServiceModesPanel(true);
@@ -1114,6 +1154,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     }
 
     setRestaurantError('');
+  setMissingRestaurantField(null);
     onSave(
       medio,
       critico,
@@ -1254,86 +1295,136 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                   <div className="md:col-span-1">
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">Nome fantasia</label>
                     <input
+                      id="restaurant-restaurantTradeName"
                       type="text"
-                      className="input w-full h-8 rounded-md text-sm"
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantTradeName' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
                       value={restaurantTradeName}
-                      onChange={e => setRestaurantTradeName(e.target.value)}
+                      onChange={e => {
+                        setRestaurantTradeName(e.target.value);
+                        if (restaurantError) setRestaurantError('');
+                        if (missingRestaurantField === 'restaurantTradeName') setMissingRestaurantField(null);
+                      }}
                       placeholder="Ex: Restaurante Durangos Burger"
                     />
+                    {missingRestaurantField === 'restaurantTradeName' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
+                    ) : null}
                   </div>
                   <div className="md:col-span-1">
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">CNPJ</label>
                     <input
+                      id="restaurant-restaurantCnpj"
                       type="text"
-                      className="input w-full h-8 rounded-md text-sm"
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantCnpj' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
                       value={restaurantCnpj}
                       onChange={e => {
                         setRestaurantCnpj(formatCnpj(e.target.value));
                         if (restaurantError) setRestaurantError('');
+                        if (missingRestaurantField === 'restaurantCnpj') setMissingRestaurantField(null);
                       }}
                       placeholder="00.000.000/0000-00"
                       inputMode="numeric"
                       maxLength={18}
                     />
+                    {missingRestaurantField === 'restaurantCnpj' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Confira este campo para continuar.</p>
+                    ) : null}
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">Razão social</label>
                     <input
+                      id="restaurant-restaurantLegalName"
                       type="text"
-                      className="input w-full h-8 rounded-md text-sm"
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantLegalName' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
                       value={restaurantLegalName}
-                      onChange={e => setRestaurantLegalName(e.target.value)}
+                      onChange={e => {
+                        setRestaurantLegalName(e.target.value);
+                        if (restaurantError) setRestaurantError('');
+                        if (missingRestaurantField === 'restaurantLegalName') setMissingRestaurantField(null);
+                      }}
                       placeholder="Ex: Restaurante Durangos Burger LTDA"
                     />
+                    {missingRestaurantField === 'restaurantLegalName' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
+                    ) : null}
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">Endereço</label>
                     <input
+                      id="restaurant-restaurantStreet"
                       type="text"
-                      className="input w-full h-8 rounded-md text-sm"
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantStreet' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
                       value={restaurantStreet}
-                      onChange={e => setRestaurantStreet(e.target.value)}
+                      onChange={e => {
+                        setRestaurantStreet(e.target.value);
+                        if (restaurantError) setRestaurantError('');
+                        if (missingRestaurantField === 'restaurantStreet') setMissingRestaurantField(null);
+                      }}
                       placeholder="Rua/Avenida"
                     />
+                    {missingRestaurantField === 'restaurantStreet' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
+                    ) : null}
                   </div>
 
                   <div>
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">Número</label>
                     <input
+                      id="restaurant-restaurantNumber"
                       type="text"
-                      className="input w-full h-8 rounded-md text-sm"
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantNumber' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
                       value={restaurantNumber}
-                      onChange={e => setRestaurantNumber(e.target.value)}
+                      onChange={e => {
+                        setRestaurantNumber(e.target.value);
+                        if (restaurantError) setRestaurantError('');
+                        if (missingRestaurantField === 'restaurantNumber') setMissingRestaurantField(null);
+                      }}
                       placeholder="Ex: 120"
                     />
+                    {missingRestaurantField === 'restaurantNumber' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">CEP</label>
                     <input
+                      id="restaurant-restaurantCep"
                       type="text"
-                      className="input w-full h-8 rounded-md text-sm"
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantCep' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
                       value={restaurantCep}
                       onChange={e => {
                         setRestaurantCep(formatCep(e.target.value));
                         if (restaurantError) setRestaurantError('');
+                        if (missingRestaurantField === 'restaurantCep') setMissingRestaurantField(null);
                       }}
                       placeholder="00000-000"
                       inputMode="numeric"
                       maxLength={9}
                     />
+                    {missingRestaurantField === 'restaurantCep' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Confira este campo para continuar.</p>
+                    ) : null}
                   </div>
 
                   <div>
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">Cidade/UF</label>
                     <input
+                      id="restaurant-restaurantCity"
                       type="text"
-                      className="input w-full h-8 rounded-md text-sm"
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantCity' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
                       value={restaurantCity}
-                      onChange={e => setRestaurantCity(e.target.value)}
+                      onChange={e => {
+                        setRestaurantCity(e.target.value);
+                        if (restaurantError) setRestaurantError('');
+                        if (missingRestaurantField === 'restaurantCity') setMissingRestaurantField(null);
+                      }}
                       placeholder="Ex: Fortaleza"
                     />
+                    {missingRestaurantField === 'restaurantCity' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
+                    ) : null}
                   </div>
                   <div>
                     <label className="block mb-1 text-xs font-semibold text-muted-foreground">Complemento</label>
@@ -2504,6 +2595,11 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
 
         {/* Footer com botão Ok */}
         <div className="border-t border-border p-4 flex justify-end gap-3 rounded-b-2xl bg-gradient-to-r from-orange-50/50 to-orange-100/30 dark:from-orange-950/20 dark:to-orange-900/20">
+          {restaurantError ? (
+            <div className="mr-auto rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+              Atenção: {restaurantError}
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => {
