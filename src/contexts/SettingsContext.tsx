@@ -72,6 +72,20 @@ type Settings = {
 
 const STORAGE_KEY = 'kds:settings:v1';
 const FIXED_PRINT_SCALE = 115;
+const DEFAULT_NEW_ORDER_SOUND = '/Songs/Efeito Sonoro - Chegou Pedido.mp3';
+const DEFAULT_READY_ORDER_SOUND = '/Songs/Efeito Sonoro - Pedido Pronto.mp3';
+
+function normalizeSoundSource(value: unknown, fallback: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+
+  // Migra caminho legado que nao existe mais no pacote atual.
+  if (raw === '/Songs/Efeito Sonoro - Chegou.mp3') {
+    return DEFAULT_NEW_ORDER_SOUND;
+  }
+
+  return raw;
+}
 
 const defaultValues: Settings = {
   tempoMedio: 15,
@@ -87,8 +101,8 @@ const defaultValues: Settings = {
   restaurantComplement: '',
   licenseFileName: null,
   licenseContent: null,
-  newOrderSound: '/Songs/Efeito Sonoro - Chegou.mp3',
-  readyOrderSound: null,
+  newOrderSound: DEFAULT_NEW_ORDER_SOUND,
+  readyOrderSound: DEFAULT_READY_ORDER_SOUND,
   newOrderSoundEnabled: true,
   readyOrderSoundEnabled: true,
   printerName: '',
@@ -218,8 +232,12 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
             .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
           setPanelEnabledServiceModes(normalizedPanelModes.length ? [...new Set(normalizedPanelModes)] : [...defaultValues.panelEnabledServiceModes]);
         }
-        if (parsed.newOrderSound) setNewOrderSound(parsed.newOrderSound);
-        if (parsed.readyOrderSound) setReadyOrderSound(parsed.readyOrderSound);
+        if (Object.prototype.hasOwnProperty.call(parsed, 'newOrderSound')) {
+          setNewOrderSound(normalizeSoundSource(parsed.newOrderSound, DEFAULT_NEW_ORDER_SOUND));
+        }
+        if (Object.prototype.hasOwnProperty.call(parsed, 'readyOrderSound')) {
+          setReadyOrderSound(normalizeSoundSource(parsed.readyOrderSound, DEFAULT_READY_ORDER_SOUND));
+        }
         if (typeof parsed.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(parsed.newOrderSoundEnabled);
         if (typeof parsed.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(parsed.readyOrderSoundEnabled);
         if (typeof parsed.printerName === 'string') setPrinterName(parsed.printerName);
@@ -264,8 +282,12 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (typeof data.lastResetDate === 'string' || data.lastResetDate === null) setLastResetDate(data.lastResetDate ?? null);
         if (typeof data.licenseFileName === 'string' || data.licenseFileName === null) setLicenseFileName(data.licenseFileName ?? null);
         if (typeof data.licenseContent === 'string' || data.licenseContent === null) setLicenseContent(data.licenseContent ?? null);
-        if (typeof data.newOrderSound === 'string' || data.newOrderSound === null) setNewOrderSound(data.newOrderSound ?? null);
-        if (typeof data.readyOrderSound === 'string' || data.readyOrderSound === null) setReadyOrderSound(data.readyOrderSound ?? null);
+        if (typeof data.newOrderSound === 'string' || data.newOrderSound === null) {
+          setNewOrderSound(normalizeSoundSource(data.newOrderSound, DEFAULT_NEW_ORDER_SOUND));
+        }
+        if (typeof data.readyOrderSound === 'string' || data.readyOrderSound === null) {
+          setReadyOrderSound(normalizeSoundSource(data.readyOrderSound, DEFAULT_READY_ORDER_SOUND));
+        }
         if (typeof data.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(data.newOrderSoundEnabled);
         if (typeof data.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(data.readyOrderSoundEnabled);
         if (typeof data.printerName === 'string') setPrinterName(data.printerName);

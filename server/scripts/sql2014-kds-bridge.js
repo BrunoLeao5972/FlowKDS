@@ -182,14 +182,15 @@ function parseItems(itemsRaw) {
 }
 
 function parseLaunchCodeFromRow(row) {
+  // Prioriza launchCode (novo campo da query de Lançamento)
   const candidates = [
+    row.launchcode,      // Novo campo principal
     row.lancamentoid,
     row.launchid,
-    row.launchcode,
+    row.externalid,      // Fallback
     row.pedidocodigo,
     row.pedidoid,
     row.idpedido,
-    row.externalid,
   ];
 
   for (const value of candidates) {
@@ -198,6 +199,21 @@ function parseLaunchCodeFromRow(row) {
   }
 
   return '';
+}
+
+function buildDemandId(externalId, updatedAt) {
+  const ext = String(externalId || '').trim();
+  if (!ext || !updatedAt) return null;
+  return `${ext}::${updatedAt.toISOString()}`;
+}
+
+function buildSyncKey(externalId, demandId) {
+  const ext = String(externalId || '').trim();
+  const demand = String(demandId || '').trim();
+  if (!ext) return '';
+  if (!demand) return ext;
+  if (demand.startsWith(`${ext}::`)) return demand;
+  return `${ext}::${demand}`;
 }
 
 function parseItemFromFlatRow(row) {
@@ -218,14 +234,31 @@ function parseItemFromFlatRow(row) {
   const sectorNormalized = rawSector != null ? String(rawSector).trim() : '';
   const itemSequenceRaw = row.itemsequence ?? row.item ?? row.itemid;
   const itemSequence = itemSequenceRaw != null ? String(itemSequenceRaw).trim() : '';
+  const productIdRaw = row.produtoid ?? row.productid ?? row.codigo ?? row.code;
+  const productId = productIdRaw != null ? String(productIdRaw).trim() : '';
+  const normalizedNameToken = String(name)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
   const launchCode = parseLaunchCodeFromRow(row);
+
+  const sourceItemKey = launchCode
+    ? [
+      launchCode,
+      itemSequence || 'item',
+      productId || 'prod',
+      normalizedNameToken || 'name',
+    ].join(':')
+    : null;
 
   return {
     name,
     quantity: Number.isFinite(quantityNumber) && quantityNumber > 0 ? quantityNumber : 1,
     notes: String(row.itemnotes ?? row.observacoes ?? row.notes ?? ''),
     sectorId: sectorNormalized || null,
-    sourceItemKey: launchCode && itemSequence ? `${launchCode}:${itemSequence}` : null,
+    sourceItemKey,
   };
 }
 
@@ -337,6 +370,7 @@ function parseServiceModeFromRow(row) {
 
 function groupRowsToOrders(rows) {
   const grouped = new Map();
+  const keepDeliveredPrincipalModes = new Set(['mesa', 'cartao', 'apartamento']);
 
   for (const rawRow of rows) {
     const row = lowerCaseKeys(rawRow);
@@ -362,6 +396,7 @@ function groupRowsToOrders(rows) {
         items: [],
         hasActiveItems: false,
         hasCancelledItems: false,
+        hasDeliveredItems: false,
         isOrderCancelled: false,
       });
     }
@@ -390,8 +425,25 @@ function groupRowsToOrders(rows) {
       }
     }
 
+    // Detecta item já entregue na mesa pelo bitmask numérico (bit 6 = 64 = Entregue no PDV)
+    const rawItemStatusNum = Number(row.itemstatus ?? row.status ?? -1);
+    const isItemDelivered = Number.isFinite(rawItemStatusNum) && rawItemStatusNum >= 0 && (rawItemStatusNum & 64) !== 0;
+
     const itemStatus = normalizeStatus(row.itemstatus ?? row.status);
-    if (itemStatus === 'cancelled') {
+    const effectiveServiceMode = current.serviceMode || parseServiceModeFromRow(row);
+    const shouldKeepDeliveredPrincipalItem = keepDeliveredPrincipalModes.has(effectiveServiceMode || '');
+    if (isItemDelivered) {
+      current.hasDeliveredItems = true;
+      if (!shouldKeepDeliveredPrincipalItem) {
+        // Fora de mesa/cartao/apartamento, mantém comportamento legado de não reenviar item entregue.
+        console.log(`[sql2014-bridge] item já entregue ignorado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
+        continue;
+      }
+
+      // Mesa/cartão/apartamento: mantém item principal no payload para não perder itens em pedidos mistos
+      // (ex.: um item com status 64 e outro com status 0 no mesmo pedido).
+      console.log(`[sql2014-bridge] item com status entregue detectado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
+    } else if (itemStatus === 'cancelled') {
       current.hasCancelledItems = true;
     } else {
       current.hasActiveItems = true;
@@ -425,8 +477,11 @@ function groupRowsToOrders(rows) {
     let finalStatus = 'received';
     if (order.isOrderCancelled) {
       finalStatus = 'cancelled';
-    } else if (!order.hasActiveItems && order.hasCancelledItems) {
+    } else if (!order.hasActiveItems && order.hasCancelledItems && !order.hasDeliveredItems) {
       finalStatus = 'cancelled';
+    } else if (!order.hasActiveItems && order.hasDeliveredItems) {
+      // Todos os itens já foram entregues na mesa — marcar como entregue no KDS
+      finalStatus = 'delivered';
     } else {
       const normalized = normalizeStatus(order.status);
       // Se a SQL trouxe um status explícito, respeita (exceto forçar 'received' para novos)
@@ -435,6 +490,7 @@ function groupRowsToOrders(rows) {
 
     return {
       ...order,
+      demandId: buildDemandId(order.externalId, order.updatedAt),
       status: finalStatus,
       items: order.items.length
         ? order.items
@@ -468,6 +524,7 @@ async function loadState() {
       idMap,
       lastStatusByExternalId: parsed.lastStatusByExternalId || {},
       blockedExternalIds: parsed.blockedExternalIds || {},
+      lastItemsSnapshotByExternalId: parsed.lastItemsSnapshotByExternalId || {},
     };
   } catch {
     const initialLastSyncAt = getInitialLastSyncAt();
@@ -477,6 +534,7 @@ async function loadState() {
       idMap: {},
       lastStatusByExternalId: {},
       blockedExternalIds: {},
+      lastItemsSnapshotByExternalId: {},
     };
   }
 }
@@ -612,9 +670,16 @@ async function createOrderInKds(row, options = {}) {
     console.log(`[sql2014-bridge] pedido ${modeLabel} detectado: suppressAutoPrint=true`);
   }
 
+  // demandId vem do agrupamento SQL (estável por externalId + updatedAt).
+  // Mantemos fallback legado para não quebrar compatibilidade.
+  const externalIdStr = String(row.externalid || '').trim();
+  const fallbackUpdatedAt = parseUpdatedAt(row.updatedAt);
+  const demandId = String(row.demandId || '').trim() || buildDemandId(externalIdStr, fallbackUpdatedAt);
+
   const payload = {
     number: Number(row.number),
-    externalid: String(row.externalid || '').trim() || undefined,
+    externalid: externalIdStr || undefined,
+    demandId: demandId || undefined,
     customerName: normalizeCustomerName(row.customername),
     serviceMode: serviceMode,
     attendant: row.attendant || null,
@@ -671,11 +736,75 @@ function parseUpdatedAt(value) {
   return parsed;
 }
 
-function buildNextLastSyncAt(maxSyncDate) {
+function buildItemFingerprint(item) {
+  const sourceItemKey = String(item?.sourceItemKey || '').trim();
+  if (sourceItemKey) return `src:${sourceItemKey}`;
+
+  const comparable = {
+    name: String(item?.name || '').trim(),
+    quantity: Number(item?.quantity || 1),
+    notes: String(item?.notes || '').trim(),
+    sectorId: item?.sectorId == null ? null : String(item.sectorId).trim(),
+  };
+
+  return `cmp:${JSON.stringify(comparable)}`;
+}
+
+function snapshotToCountMap(snapshot) {
+  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const map = new Map();
+  for (const [key, rawCount] of Object.entries(source)) {
+    const count = Number(rawCount || 0);
+    if (!key || !Number.isFinite(count) || count <= 0) continue;
+    map.set(key, count);
+  }
+  return map;
+}
+
+function buildItemsSnapshot(items) {
+  const counts = {};
+  for (const item of Array.isArray(items) ? items : []) {
+    const fingerprint = buildItemFingerprint(item);
+    counts[fingerprint] = Number(counts[fingerprint] || 0) + 1;
+  }
+  return counts;
+}
+
+function getDeltaItems(currentItems, previousSnapshot) {
+  const previousCounts = snapshotToCountMap(previousSnapshot);
+  const delta = [];
+
+  for (const item of Array.isArray(currentItems) ? currentItems : []) {
+    const fingerprint = buildItemFingerprint(item);
+    const available = Number(previousCounts.get(fingerprint) || 0);
+
+    if (available > 0) {
+      previousCounts.set(fingerprint, available - 1);
+      continue;
+    }
+
+    delta.push(item);
+  }
+
+  return delta;
+}
+
+function buildNextLastSyncAt(maxSyncDate, currentLastSyncAt) {
   const nextValue = new Date(maxSyncDate.getTime() - SQL_SYNC_OVERLAP_MS);
   if (Number.isNaN(nextValue.getTime())) {
     return maxSyncDate.toISOString();
   }
+
+  const current = parseUpdatedAt(currentLastSyncAt);
+  if (!current) {
+    return nextValue.toISOString();
+  }
+
+  // Evita ficar preso reprocessando o mesmo lote quando overlap resulta no mesmo cursor.
+  if (nextValue.getTime() <= current.getTime()) {
+    return maxSyncDate.toISOString();
+  }
+
   return nextValue.toISOString();
 }
 
@@ -695,16 +824,19 @@ async function syncCycle(pool, state, queryText, options = {}) {
   const rows = Array.isArray(result.recordset) ? result.recordset : [];
   console.log(`[sql2014-bridge] query retornou ${rows.length} linhas`);
   if (rows.length > 0) {
-    console.log(`[sql2014-bridge] primeira linha: externalId=${rows[0].externalId} number=${rows[0].number} updatedAt=${rows[0].updatedAt}`);
+    const firstRow = rows[0];
+    console.log(`[sql2014-bridge] primeira linha: externalId=${firstRow.externalId} launchCode=${firstRow.launchCode} number=${firstRow.number} updatedAt=${firstRow.updatedAt}`);
+    console.log(`[sql2014-bridge] estrutura: serviceMode=${firstRow.serviceMode} tipoAtendimento=${firstRow.tipoAtendimento} sellerName=${firstRow.sellerName || 'null'}`);
   }
 
   const orders = groupRowsToOrders(rows);
-  console.log(`[sql2014-bridge] agrupado em ${orders.length} pedidos`);
+  console.log(`[sql2014-bridge] agrupado em ${orders.length} pedidos (demandas)`);
   
-  // Log dos primeiros pedidos para debug de sellerName
+  // Log dos primeiros pedidos para debug
   if (orders.length > 0) {
     orders.slice(0, 3).forEach(o => {
-      console.log(`[sql2014-bridge] pedido ${o.externalId}: sellerName=${o.sellerName || 'null'}, attendant=${o.attendant}, serviceMode=${o.serviceMode}`);
+      const demandInfo = o.demandId ? ` demandId=${o.demandId}` : '';
+      console.log(`[sql2014-bridge] demanda ${o.externalId}${demandInfo}: itens=${o.items.length}, vendedor=${o.sellerName || 'null'}, atendimento=${o.attendant}, modo=${o.serviceMode}`);
     });
   }
 
@@ -720,9 +852,11 @@ async function syncCycle(pool, state, queryText, options = {}) {
 
   for (const row of orders) {
     const externalId = String(row.externalId || '').trim();
+    const demandId = String(row.demandId || '').trim() || buildDemandId(externalId, parseUpdatedAt(row.updatedAt));
+    const syncKey = buildSyncKey(externalId, demandId);
     const updatedAt = parseUpdatedAt(row.updatedAt);
 
-    if (!externalId || !updatedAt) {
+    if (!externalId || !updatedAt || !syncKey) {
       skipped += 1;
       continue;
     }
@@ -732,10 +866,34 @@ async function syncCycle(pool, state, queryText, options = {}) {
     }
 
     const mappedStatus = normalizeStatus(row.status);
-    let kdsId = state.idMap[externalId];
+    const currentItems = Array.isArray(row.items) ? row.items : [];
+    const previousItemsSnapshot = state.lastItemsSnapshotByExternalId?.[externalId] || {};
+    const deltaItems = getDeltaItems(currentItems, previousItemsSnapshot);
+    const hasDemandScope = Boolean(demandId);
+    let kdsId = hasDemandScope ? state.idMap[syncKey] : (state.idMap[syncKey] || state.idMap[externalId]);
 
-    const blocked = state.blockedExternalIds?.[externalId];
+    const blocked = hasDemandScope
+      ? state.blockedExternalIds?.[syncKey]
+      : (state.blockedExternalIds?.[syncKey] || state.blockedExternalIds?.[externalId]);
     if (blocked) {
+      skipped += 1;
+      continue;
+    }
+
+    // Se todos os itens já foram entregues (status=delivered) e o pedido nunca entrou no KDS,
+    // não criar — evita poluir a cozinha com comandas já finalizadas.
+    if (mappedStatus === 'delivered' && !kdsId) {
+      console.log(`[sql2014-bridge] lançamento já entregue ignorado (nunca foi para KDS): externalId=${externalId}`);
+      // Avança o cursor mesmo assim para não reprocessar
+      state.lastStatusByExternalId[syncKey] = 'delivered';
+      state.lastItemsSnapshotByExternalId[externalId] = buildItemsSnapshot(currentItems);
+      skipped += 1;
+      continue;
+    }
+
+    // Para demanda nova da mesma comanda, cria card apenas quando houver item novo.
+    if (!kdsId && deltaItems.length === 0) {
+      state.lastItemsSnapshotByExternalId[externalId] = buildItemsSnapshot(currentItems);
       skipped += 1;
       continue;
     }
@@ -749,8 +907,9 @@ async function syncCycle(pool, state, queryText, options = {}) {
         integrator: row.integrator,
         sellerName: row.sellerName,
         observations: row.observations,
-        itemsjson: row.items,
+        itemsjson: kdsId ? currentItems : deltaItems,
         externalid: externalId,
+        demandId,
         updatedAt: updatedAt.toISOString(),
       }, {
         suppressAutoPrint: options.suppressAutoPrint === true,
@@ -760,12 +919,12 @@ async function syncCycle(pool, state, queryText, options = {}) {
       if (syncedOrderId) {
         if (!kdsId) {
           kdsId = syncedOrderId;
-          state.idMap[externalId] = kdsId;
+          state.idMap[syncKey] = kdsId;
           await saveState(state); // salva imediatamente para evitar duplicata em caso de crash
           created += 1;
         } else if (kdsId !== syncedOrderId) {
           console.warn(
-            `[sql2014-bridge] bloqueando replay de pedido removido: externalId=${externalId} kdsId antigo=${kdsId} novo=${syncedOrderId}`
+            `[sql2014-bridge] bloqueando replay de pedido removido: key=${syncKey} kdsId antigo=${kdsId} novo=${syncedOrderId}`
           );
 
           // Se o pedido antigo foi removido no KDS/Mongo, nao ressuscitar automaticamente.
@@ -773,16 +932,16 @@ async function syncCycle(pool, state, queryText, options = {}) {
             await callKdsApi(`/orders/${encodeURIComponent(syncedOrderId)}`, { method: 'DELETE' });
           } catch (deleteError) {
             console.warn(
-              `[sql2014-bridge] falha ao remover replay externo externalId=${externalId} kdsId=${syncedOrderId}: ${String(deleteError?.message || deleteError || '')}`
+              `[sql2014-bridge] falha ao remover replay externo key=${syncKey} kdsId=${syncedOrderId}: ${String(deleteError?.message || deleteError || '')}`
             );
           }
 
-          state.blockedExternalIds[externalId] = {
+          state.blockedExternalIds[syncKey] = {
             blockedAt: new Date().toISOString(),
             lastUpdatedAt: updatedAt.toISOString(),
             reason: `stale_mapping_resurrection_blocked old=${kdsId} new=${syncedOrderId}`,
           };
-          delete state.idMap[externalId];
+          delete state.idMap[syncKey];
           await saveState(state);
           skipped += 1;
           continue;
@@ -792,48 +951,52 @@ async function syncCycle(pool, state, queryText, options = {}) {
       if (kdsId) {
         // Pedido já existe no KDS: preservar status se está em 'preparing' ou 'ready'
         // Só sincronizar status novamente se voltou para 'received' na SQL (contra-sincronização)
-        const lastKnownStatus = state.lastStatusByExternalId[externalId] || 'received';
+        const lastKnownStatus = hasDemandScope
+          ? (state.lastStatusByExternalId[syncKey] || 'received')
+          : (state.lastStatusByExternalId[syncKey] || state.lastStatusByExternalId[externalId] || 'received');
 
         // Apenas atualizar se a SQL força voltar para 'received' (caso contrário, respeita KDS)
         if (mappedStatus === 'received' && lastKnownStatus !== 'received') {
           // SQL voltou para 'received': pode significar cancelamento, então sincroniza
           const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
           if (didUpdate) {
-            state.lastStatusByExternalId[externalId] = mappedStatus;
+            state.lastStatusByExternalId[syncKey] = mappedStatus;
             updated += 1;
           }
         } else if (mappedStatus !== lastKnownStatus && mappedStatus !== 'preparing' && mappedStatus !== 'ready') {
           // Apenas sincroniza status de 'cancelled' ou outros status administrativos
           const didUpdate = await safeUpdateOrderStatusInKds(kdsId, mappedStatus, { externalId });
           if (didUpdate) {
-            state.lastStatusByExternalId[externalId] = mappedStatus;
+            state.lastStatusByExternalId[syncKey] = mappedStatus;
             updated += 1;
           }
         }
       }
 
-      if (!state.lastStatusByExternalId[externalId]) {
-        state.lastStatusByExternalId[externalId] = mappedStatus;
+      if (!state.lastStatusByExternalId[syncKey]) {
+        state.lastStatusByExternalId[syncKey] = mappedStatus;
       }
+
+      state.lastItemsSnapshotByExternalId[externalId] = buildItemsSnapshot(currentItems);
 
       processed += 1;
     } catch (error) {
       const message = String(error?.message || error || '');
       if (isPermanentOrderError(message)) {
-        state.blockedExternalIds[externalId] = {
+        state.blockedExternalIds[syncKey] = {
           blockedAt: new Date().toISOString(),
           lastUpdatedAt: updatedAt.toISOString(),
           reason: message.slice(0, 500),
         };
         skipped += 1;
-        console.warn(`[sql2014-bridge] pedido bloqueado para evitar replay: externalId=${externalId} reason=${message}`);
+        console.warn(`[sql2014-bridge] pedido bloqueado para evitar replay: key=${syncKey} reason=${message}`);
         continue;
       }
       throw error;
     }
   }
 
-  state.lastSyncAt = buildNextLastSyncAt(maxSyncDate);
+  state.lastSyncAt = buildNextLastSyncAt(maxSyncDate, state.lastSyncAt);
   await saveState(state);
 
   return {

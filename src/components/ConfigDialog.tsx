@@ -512,12 +512,11 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       .map(([k, v]) => `"${k.replace(/"/g, '""')}","${v.replace(/"/g, '""')}"`)
       .join('\n');
 
-    const cooksHeader = '\n\nCozinheiro,Pedidos,Media(min),TaxaAtraso(%),PedidosProduzidos\n';
+    const cooksHeader = '\n\nCozinheiro,Pedidos,Media(min),TaxaAtraso(%)\n';
     const cooksCsv = cooks
       .map(cook => {
-        const produced = (cook.orderNumbers || []).join(' | ');
         const cookName = formatCookName(String(cook.cookId));
-        return `"${cookName.replace(/"/g, '""')}","${cook.totalOrders}","${Math.round(cook.avgPrepTimeMin ?? 0)}","${(cook.lateRatePct ?? 0).toFixed(1)}","${produced.replace(/"/g, '""')}"`;
+        return `"${cookName.replace(/"/g, '""')}","${cook.totalOrders}","${Math.round(cook.avgPrepTimeMin ?? 0)}","${(cook.lateRatePct ?? 0).toFixed(1)}"`;
       })
       .join('\n');
 
@@ -538,18 +537,25 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     const rows = getReportSummaryRows();
     const cooks = reportData.teamProductivity?.byCook || [];
     const rangeText = `${reportFromDate || 'início'} ${reportFromTime || ''} até ${reportToDate || 'agora'} ${reportToTime || ''}`.trim();
+    const restaurantName = (restaurantTradeName || settings.restaurantTradeName || restaurantLegalName || 'Restaurante').trim();
+
+    const escapeHtml = (value: string) => String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
 
     const summaryHtml = rows
-      .map(([k, v]) => `<tr><td style="padding:6px 8px;border:1px solid #ddd;">${k}</td><td style="padding:6px 8px;border:1px solid #ddd;">${v}</td></tr>`)
+      .map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`)
       .join('');
 
     const cooksHtml = cooks
       .map(cook => `<tr>
-          <td style="padding:6px 8px;border:1px solid #ddd;">${formatCookName(String(cook.cookId))}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;">${cook.totalOrders}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;">${Math.round(cook.avgPrepTimeMin ?? 0)}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;">${(cook.lateRatePct ?? 0).toFixed(1)}%</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;">${(cook.orderNumbers || []).join(', ')}</td>
+          <td>${escapeHtml(formatCookName(String(cook.cookId)))}</td>
+          <td>${cook.totalOrders}</td>
+          <td>${Math.round(cook.avgPrepTimeMin ?? 0)}</td>
+          <td>${(cook.lateRatePct ?? 0).toFixed(1)}%</td>
         </tr>`)
       .join('');
 
@@ -558,27 +564,135 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
         <head>
           <meta charset="utf-8" />
           <title>Relatório Operacional</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: 'Segoe UI', Arial, sans-serif;
+              color: #1f2937;
+              background: #fff7ed;
+              padding: 22px;
+            }
+            .sheet {
+              border: 1px solid #fed7aa;
+              border-radius: 18px;
+              background: #ffffff;
+              overflow: hidden;
+            }
+            .hero {
+              padding: 18px 20px;
+              color: #ffffff;
+              background: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #9a3412 100%);
+            }
+            .hero-top {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              gap: 12px;
+            }
+            .brand {
+              display: inline-block;
+              font-size: 11px;
+              font-weight: 700;
+              letter-spacing: 0.08em;
+              text-transform: uppercase;
+              border: 1px solid rgba(255, 255, 255, 0.45);
+              border-radius: 999px;
+              padding: 4px 10px;
+              background: rgba(255, 255, 255, 0.1);
+            }
+            .version {
+              font-size: 11px;
+              opacity: 0.9;
+            }
+            .title {
+              margin: 10px 0 0;
+              font-size: 24px;
+              line-height: 1.2;
+            }
+            .subtitle {
+              margin: 6px 0 0;
+              font-size: 13px;
+              opacity: 0.95;
+            }
+            .content {
+              padding: 18px;
+            }
+            .card {
+              border: 1px solid #e5e7eb;
+              border-radius: 14px;
+              overflow: hidden;
+              margin-bottom: 14px;
+            }
+            .card h2 {
+              margin: 0;
+              padding: 10px 12px;
+              font-size: 14px;
+              color: #9a3412;
+              background: #fff1e6;
+              border-bottom: 1px solid #fed7aa;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            th, td {
+              padding: 9px 12px;
+              font-size: 12px;
+              border-bottom: 1px solid #f3f4f6;
+              text-align: left;
+            }
+            thead th {
+              background: #fff7ed;
+              color: #7c2d12;
+              font-weight: 700;
+            }
+            tbody tr:nth-child(even) td {
+              background: #fffbf7;
+            }
+            .footer {
+              padding: 0 18px 16px;
+              font-size: 11px;
+              color: #6b7280;
+            }
+          </style>
         </head>
-        <body style="font-family: Arial, sans-serif; padding: 20px; color: #222;">
-          <h1 style="margin:0 0 8px;">Relatório Operacional</h1>
-          <p style="margin:0 0 18px; color:#555;">Período: ${rangeText}</p>
-          <h2 style="margin:0 0 8px; font-size:18px;">Resumo</h2>
-          <table style="border-collapse:collapse; width:100%; margin-bottom:20px;">
-            <tbody>${summaryHtml}</tbody>
-          </table>
-          <h2 style="margin:0 0 8px; font-size:18px;">Produtividade por cozinheiro</h2>
-          <table style="border-collapse:collapse; width:100%;">
-            <thead>
-              <tr>
-                <th style="text-align:left;padding:6px 8px;border:1px solid #ddd;">Cozinheiro</th>
-                <th style="text-align:left;padding:6px 8px;border:1px solid #ddd;">Pedidos</th>
-                <th style="text-align:left;padding:6px 8px;border:1px solid #ddd;">Média (min)</th>
-                <th style="text-align:left;padding:6px 8px;border:1px solid #ddd;">Taxa de atraso</th>
-                <th style="text-align:left;padding:6px 8px;border:1px solid #ddd;">Pedidos produzidos</th>
-              </tr>
-            </thead>
-            <tbody>${cooksHtml}</tbody>
-          </table>
+        <body>
+          <div class="sheet">
+            <header class="hero">
+              <div class="hero-top">
+                <span class="brand">FOX KDS</span>
+                <span class="version">Versão ${escapeHtml(APP_VERSION)}</span>
+              </div>
+              <h1 class="title">Relatório Operacional</h1>
+              <p class="subtitle">${escapeHtml(restaurantName)} | Período: ${escapeHtml(rangeText)}</p>
+            </header>
+
+            <section class="content">
+              <div class="card">
+                <h2>Resumo</h2>
+                <table>
+                  <tbody>${summaryHtml}</tbody>
+                </table>
+              </div>
+
+              <div class="card">
+                <h2>Produtividade por cozinheiro</h2>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Cozinheiro</th>
+                      <th>Pedidos</th>
+                      <th>Média (min)</th>
+                      <th>Taxa de atraso</th>
+                    </tr>
+                  </thead>
+                  <tbody>${cooksHtml}</tbody>
+                </table>
+              </div>
+            </section>
+            <div class="footer">Documento gerado automaticamente pelo FOX KDS.</div>
+          </div>
         </body>
       </html>`;
 
@@ -1828,30 +1942,18 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       <p className="text-sm text-muted-foreground">Sem dados por cozinheiro no período.</p>
                     ) : (
                       <div className="space-y-2">
-                        <div className="hidden md:grid md:grid-cols-5 gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-2">
+                        <div className="hidden md:grid md:grid-cols-4 gap-2 text-[11px] uppercase tracking-wide text-muted-foreground px-2">
                           <span>Cozinheiro</span>
                           <span>Pedidos</span>
                           <span>Média</span>
                           <span>Taxa atraso</span>
-                          <span>Pedidos produzidos</span>
                         </div>
                         {(reportData.teamProductivity?.byCook || []).slice(0, 8).map(cook => (
-                          <div key={cook.cookId} className="grid grid-cols-1 md:grid-cols-5 gap-2 text-sm rounded-md border border-border/70 bg-background p-2.5">
+                          <div key={cook.cookId} className="grid grid-cols-1 md:grid-cols-4 gap-2 text-sm rounded-md border border-border/70 bg-background p-2.5">
                             <span className="font-semibold truncate">{formatCookName(String(cook.cookId))}</span>
                             <span>{cook.totalOrders} pedidos</span>
                             <span>{Math.round(cook.avgPrepTimeMin ?? 0)} min</span>
                             <span>{(cook.lateRatePct ?? 0).toFixed(1)}%</span>
-                            <div className="flex flex-wrap gap-1">
-                              {(cook.orderNumbers || []).length > 0 ? (
-                                (cook.orderNumbers || []).slice(0, 10).map(orderNumber => (
-                                  <span key={`${cook.cookId}-${orderNumber}`} className="px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 text-xs font-medium">
-                                    {orderNumber}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="text-xs text-muted-foreground">Sem pedidos</span>
-                              )}
-                            </div>
                           </div>
                         ))}
                       </div>

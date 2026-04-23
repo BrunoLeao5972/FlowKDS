@@ -40,6 +40,8 @@ const PRINT_PEDIDO_MODO = String(process.env.PRINT_PEDIDO_MODO || 'IMPRESSORA').
 const PRINT_PEDIDO_IMPRESSORA = String(process.env.PRINT_PEDIDO_IMPRESSORA || '').trim();
 const PRINT_PEDIDO_OUTPUT_DIR = String(process.env.PRINT_PEDIDO_OUTPUT_DIR || '').trim();
 const FIXED_PRINT_SCALE = 115;
+const DEFAULT_NEW_ORDER_SOUND = '/Songs/Efeito Sonoro - Chegou Pedido.mp3';
+const DEFAULT_READY_ORDER_SOUND = '/Songs/Efeito Sonoro - Pedido Pronto.mp3';
 const REPORT_IDLE_BREAK_MINUTES = Number(process.env.REPORT_IDLE_BREAK_MINUTES || 180);
 
 app.use(cors({ origin: CORS_ORIGIN }));
@@ -538,6 +540,42 @@ function mergeIncomingOrderItems(existingItems, incomingItems) {
   };
 }
 
+function buildFallbackDemandId(externalId, sourceUpdatedAt) {
+  const ext = String(externalId || '').trim();
+  if (!ext) return null;
+
+  if (sourceUpdatedAt !== undefined && sourceUpdatedAt !== null) {
+    const asDate = new Date(sourceUpdatedAt);
+    if (!Number.isNaN(asDate.getTime())) {
+      return `${ext}::${asDate.toISOString()}`;
+    }
+  }
+
+  return `${ext}:${Math.floor(Date.now() / 60000)}`;
+}
+
+function shouldForkTerminalOrder(existingOrder, incomingPayload) {
+  if (!existingOrder || !['ready', 'delivered', 'cancelled'].includes(existingOrder.status)) {
+    return false;
+  }
+
+  const existingComparableItems = JSON.stringify((existingOrder.items || []).map(getComparableOrderItem));
+  const incomingComparableItems = JSON.stringify((incomingPayload.items || []).map(getComparableOrderItem));
+
+  if (existingComparableItems !== incomingComparableItems) return true;
+
+  const incomingSourceUpdatedAt = incomingPayload.sourceUpdatedAt;
+  if (
+    incomingSourceUpdatedAt !== undefined
+    && incomingSourceUpdatedAt !== null
+    && (existingOrder.lastSyncedAt == null || incomingSourceUpdatedAt > existingOrder.lastSyncedAt)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function buildCreatedAtMatch(fromRaw, toRaw) {
   const from = parseTimestamp(fromRaw);
   const to = parseTimestamp(toRaw);
@@ -627,8 +665,8 @@ function normalizeRestaurantPayload(payload) {
     lastResetDate: raw.lastResetDate ? toSafeString(raw.lastResetDate) : null,
     licenseFileName: raw.licenseFileName === null ? null : (raw.licenseFileName ? toSafeString(raw.licenseFileName) : null),
     licenseContent: raw.licenseContent === null ? null : (raw.licenseContent ? String(raw.licenseContent) : null),
-    newOrderSound: raw.newOrderSound === null ? null : (raw.newOrderSound ? String(raw.newOrderSound) : null),
-    readyOrderSound: raw.readyOrderSound === null ? null : (raw.readyOrderSound ? String(raw.readyOrderSound) : null),
+    newOrderSound: raw.newOrderSound === null ? DEFAULT_NEW_ORDER_SOUND : (raw.newOrderSound ? String(raw.newOrderSound) : DEFAULT_NEW_ORDER_SOUND),
+    readyOrderSound: raw.readyOrderSound === null ? DEFAULT_READY_ORDER_SOUND : (raw.readyOrderSound ? String(raw.readyOrderSound) : DEFAULT_READY_ORDER_SOUND),
     newOrderSoundEnabled: toSafeBoolean(raw.newOrderSoundEnabled, true),
     readyOrderSoundEnabled: toSafeBoolean(raw.readyOrderSoundEnabled, true),
     printerName: toSafeString(raw.printerName),
@@ -902,8 +940,8 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
       lastResetDate: null,
       licenseFileName: null,
       licenseContent: null,
-      newOrderSound: null,
-      readyOrderSound: null,
+      newOrderSound: DEFAULT_NEW_ORDER_SOUND,
+      readyOrderSound: DEFAULT_READY_ORDER_SOUND,
       newOrderSoundEnabled: true,
       readyOrderSoundEnabled: true,
       printerName: '',
@@ -935,8 +973,8 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     lastResetDate: existing.lastResetDate || null,
     licenseFileName: existing.licenseFileName ?? null,
     licenseContent: existing.licenseContent ?? null,
-    newOrderSound: existing.newOrderSound ?? null,
-    readyOrderSound: existing.readyOrderSound ?? null,
+    newOrderSound: existing.newOrderSound || DEFAULT_NEW_ORDER_SOUND,
+    readyOrderSound: existing.readyOrderSound || DEFAULT_READY_ORDER_SOUND,
     newOrderSoundEnabled: existing.newOrderSoundEnabled ?? true,
     readyOrderSoundEnabled: existing.readyOrderSoundEnabled ?? true,
     printerName: existing.printerName || '',
@@ -995,8 +1033,8 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     lastResetDate: saved.lastResetDate || null,
     licenseFileName: saved.licenseFileName ?? null,
     licenseContent: saved.licenseContent ?? null,
-    newOrderSound: saved.newOrderSound ?? null,
-    readyOrderSound: saved.readyOrderSound ?? null,
+    newOrderSound: saved.newOrderSound || DEFAULT_NEW_ORDER_SOUND,
+    readyOrderSound: saved.readyOrderSound || DEFAULT_READY_ORDER_SOUND,
     newOrderSoundEnabled: saved.newOrderSoundEnabled ?? true,
     readyOrderSoundEnabled: saved.readyOrderSoundEnabled ?? true,
     printerName: saved.printerName || '',
@@ -1701,73 +1739,120 @@ app.post('/orders', asyncHandler(async (req, res) => {
     }
   }
 
-  const normalizedIncomingItems = items.map(normalizeStoredOrderItem);
-  const externalId = String(req.body?.externalid ?? req.body?.externalId ?? '').trim() || null;
+  let normalizedIncomingItems = items.map(normalizeStoredOrderItem);
+  let externalId = String(req.body?.externalid ?? req.body?.externalId ?? '').trim() || null;
+  
+  // Captura demandId (agrupador de itens lançados no mesmo momento)
+  // Se não vier, gera fallback estável com externalId + sourceUpdatedAt.
+  let demandId = String(req.body?.demandId ?? '').trim() || null;
+  if (!demandId && externalId) {
+    demandId = buildFallbackDemandId(externalId, sourceUpdatedAt);
+  }
+  
   if (externalId) {
+    const identityQuery = demandId
+      ? { tenantId: LEGACY_TENANT_ID, externalId, demandId }
+      : { tenantId: LEGACY_TENANT_ID, externalId };
+
     const existingOrder = await Order.findOne({
-      tenantId: LEGACY_TENANT_ID,
-      externalId,
+      ...identityQuery,
     }).lean();
 
     if (existingOrder) {
-      const mergeResult = mergeIncomingOrderItems(existingOrder.items || [], normalizedIncomingItems);
-      const appendedItemsCount = mergeResult.appendedCount;
-      const metadataPatch = {
-        number,
-        customerName: customerName || '',
-        serviceMode,
-        attendant,
-        integratorId,
-        integratorName,
-        sellerName: sellerName || null,
-        observations: observations || '',
-      };
-      const metadataChanged = Object.entries(metadataPatch).some(([key, value]) => {
-        const currentValue = existingOrder[key];
-        return (currentValue ?? null) !== (value ?? null);
-      });
-      const itemsChanged = JSON.stringify(existingOrder.items || []) !== JSON.stringify(mergeResult.mergedItems);
-      const shouldReopenOrder = appendedItemsCount > 0 && ['ready', 'delivered', 'cancelled'].includes(existingOrder.status);
-      const shouldAdvanceSyncMarker = sourceUpdatedAt !== undefined
-        && sourceUpdatedAt !== null
-        && (existingOrder.lastSyncedAt == null || sourceUpdatedAt > existingOrder.lastSyncedAt);
+      // Se já existe exatamente a mesma demanda, mantém idempotência.
+      // Exceção: quando chegar novo lançamento para mesa/cartão já finalizado,
+      // criamos nova demanda para abrir novo card e não misturar itens antigos.
+      if (['ready', 'delivered', 'cancelled'].includes(existingOrder.status)) {
+        const mustCreateFreshDemand = shouldForkTerminalOrder(existingOrder, {
+          items: normalizedIncomingItems,
+          sourceUpdatedAt,
+        });
 
-      if (!itemsChanged && !metadataChanged && !shouldAdvanceSyncMarker) {
-        return res.status(200).json(toISO(existingOrder));
+        if (!mustCreateFreshDemand) {
+          return res.status(200).json(toISO(existingOrder));
+        }
+
+        demandId = buildFallbackDemandId(externalId, sourceUpdatedAt ?? Date.now());
+      } else {
+        // Pedido em andamento - mesclar itens normalmente
+        const mergeResult = mergeIncomingOrderItems(existingOrder.items || [], normalizedIncomingItems);
+        const appendedItemsCount = mergeResult.appendedCount;
+        
+        // Se é um novo lançamento para a mesma mesa/externalId, gerar novo demandId
+        const newDemandId = demandId || (externalId 
+          ? buildFallbackDemandId(externalId, sourceUpdatedAt)
+          : existingOrder.demandId);
+        
+        const metadataPatch = {
+          number,
+          customerName: customerName || '',
+          serviceMode,
+          attendant,
+          integratorId,
+          integratorName,
+          sellerName: sellerName || null,
+          observations: observations || '',
+          demandId: newDemandId,
+        };
+        const metadataChanged = Object.entries(metadataPatch).some(([key, value]) => {
+          const currentValue = existingOrder[key];
+          return (currentValue ?? null) !== (value ?? null);
+        });
+        const itemsChanged = JSON.stringify(existingOrder.items || []) !== JSON.stringify(mergeResult.mergedItems);
+        const shouldAdvanceSyncMarker = sourceUpdatedAt !== undefined
+          && sourceUpdatedAt !== null
+          && (existingOrder.lastSyncedAt == null || sourceUpdatedAt > existingOrder.lastSyncedAt);
+
+        if (!itemsChanged && !metadataChanged && !shouldAdvanceSyncMarker) {
+          return res.status(200).json(toISO(existingOrder));
+        }
+
+        const now = Date.now();
+        const patch = {
+          ...metadataPatch,
+          updatedAt: now,
+          syncVersion: Number(existingOrder.syncVersion || 1) + 1,
+          lastSyncedAt: shouldAdvanceSyncMarker ? sourceUpdatedAt : existingOrder.lastSyncedAt,
+        };
+
+        if (itemsChanged) {
+          patch.items = mergeResult.mergedItems;
+        }
+
+        const updatedOrder = await Order.findOneAndUpdate(
+          { tenantId: LEGACY_TENANT_ID, id: existingOrder.id },
+          patch,
+          { new: true, lean: true }
+        );
+
+        io.emit('orders:updated', toISO(updatedOrder));
+        return res.status(200).json(toISO(updatedOrder));
       }
+    }
+  }
 
-      const now = Date.now();
-      const patch = {
-        ...metadataPatch,
-        updatedAt: now,
-        syncVersion: Number(existingOrder.syncVersion || 1) + 1,
-        lastSyncedAt: shouldAdvanceSyncMarker ? sourceUpdatedAt : existingOrder.lastSyncedAt,
-      };
-
-      if (itemsChanged) {
-        patch.items = mergeResult.mergedItems;
-      }
-
-      if (shouldReopenOrder) {
-        patch.status = 'received';
-        patch.readyAt = null;
-        patch.deliveredAt = null;
-        patch.cancelledAt = null;
-        patch.cancelAcknowledgedAt = null;
-        patch.stageEvents = [
-          ...(existingOrder.stageEvents || []),
-          { status: 'received', at: now, cookId: existingOrder.cookId || null },
-        ];
-      }
-
-      const updatedOrder = await Order.findOneAndUpdate(
-        { tenantId: LEGACY_TENANT_ID, id: existingOrder.id },
-        patch,
-        { new: true, lean: true }
+  // Filtrar itens já entregues/cancelados em cards anteriores do mesmo externalId.
+  // Evita contaminação quando o bridge reenvia todos os itens acumulados do SQL.
+  if (externalId) {
+    const deliveredOrders = await Order.find(
+      { tenantId: LEGACY_TENANT_ID, externalId, status: { $in: ['delivered', 'cancelled'] } },
+      { items: 1, id: 1, createdAt: 1 }
+    ).lean();
+    if (deliveredOrders.length > 0) {
+      const deliveredKeys = new Set(
+        deliveredOrders.flatMap(o => o.items || [])
+          .map(i => String(i?.sourceItemKey || '').trim())
+          .filter(Boolean)
       );
-
-      io.emit('orders:updated', toISO(updatedOrder));
-      return res.status(200).json(toISO(updatedOrder));
+      const freshItems = normalizedIncomingItems.filter(item => {
+        const key = String(item?.sourceItemKey || '').trim();
+        return !key || !deliveredKeys.has(key);
+      });
+      if (freshItems.length === 0) {
+        const latest = deliveredOrders.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+        return res.status(200).json(toISO(latest));
+      }
+      normalizedIncomingItems = freshItems;
     }
   }
 
@@ -1777,6 +1862,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
     tenantId: LEGACY_TENANT_ID,
     id,
     externalId,
+    demandId: demandId || null,
     number,
     customerName: customerName || '',
     serviceMode,
@@ -1899,10 +1985,12 @@ app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
   const anyItemInProgress = normalizedItemStatuses.some(status => status === 'preparing' || status === 'ready');
 
   let derivedOrderStatus = order.status;
-  if (order.status !== 'cancelled' && order.status !== 'delivered' && order.status !== 'ready') {
-    // "ready" só é atingido manualmente via PATCH /status (comanda completa).
-    // Aqui apenas deriva entre received <-> preparing.
-    if (anyItemInProgress) {
+  if (order.status !== 'cancelled' && order.status !== 'delivered') {
+    // Se todos os itens estão prontos, o pedido vai para "ready" automaticamente.
+    // Caso contrário, deriva entre received <-> preparing conforme progresso.
+    if (allItemsReady) {
+      derivedOrderStatus = 'ready';
+    } else if (anyItemInProgress) {
       derivedOrderStatus = 'preparing';
     } else {
       derivedOrderStatus = 'received';
@@ -1922,6 +2010,10 @@ app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
     if (order.status !== 'preparing') {
       patch.startedAtHistory = [...(order.startedAtHistory || []), now];
     }
+  }
+
+  if (derivedOrderStatus === 'ready' && !order.readyAt) {
+    patch.readyAt = now;
   }
 
   if (derivedOrderStatus !== order.status) {

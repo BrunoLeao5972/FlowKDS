@@ -40,6 +40,19 @@ function isMesaOuCartao(serviceMode) {
   return normalized === 'mesa' || normalized === 'cartao';
 }
 
+function obterTituloTicket(serviceMode) {
+  const normalized = String(serviceMode || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (normalized === 'mesa') return 'Mesa';
+  if (normalized === 'cartao') return 'Cartão';
+  if (normalized === 'apartamento') return 'Apartamento';
+  return 'Senha do Pedido';
+}
+
 function obterNomeResponsavel(options = {}) {
   const serviceMode = String(options.serviceMode || '').trim().toLowerCase();
   const attendant = String(options.attendant || '').trim();
@@ -106,6 +119,7 @@ function montarDadosTicket(numeroPedido, options = {}) {
   return {
     numeroPedido: Number(numeroPedido),
     tradeName: String(options.tradeName || '').trim(),
+    ticketTitle: obterTituloTicket(options.serviceMode),
     customerName: obterNomeClienteParaImpressao(options.customerName || ''),
     serviceMode: String(options.serviceMode || '').trim().toLowerCase() || null,
     attendant: String(options.attendant || '').trim(),
@@ -360,6 +374,7 @@ async function imprimirDiretoGdi(ticket, nomeImpressora) {
   const printerEscaped = escapePowerShellSingleQuote(nomeImpressora);
   const payload = {
     numeroPedido: normalizarParaAscii(String(ticket?.numeroPedido || '')),
+    ticketTitle: normalizarParaAscii(String(ticket?.ticketTitle || 'Senha do Pedido')),
     tradeName: normalizarParaAscii(String(ticket?.tradeName || '')),
     identificationLabel: normalizarParaAscii(String(identification?.label || 'CLIENTE')),
     identificationName: normalizarParaAscii(String(identification?.name || 'Cliente nao cadastrado')),
@@ -419,7 +434,7 @@ $doc.add_PrintPage({
 
   $e.Graphics.DrawLine([System.Drawing.Pens]::Black, $x, $y, $x + $width, $y)
   $y += (4 * $scale)
-  $y += Draw-CenteredText 'Senha do Pedido' $fontLabel $y
+  $y += Draw-CenteredText ([string]$ticket.ticketTitle) $fontLabel $y
   $y += (2 * $scale)
   $y += Draw-CenteredText ([string]$ticket.numeroPedido) $fontSenha $y
   $y += (4 * $scale)
@@ -556,6 +571,7 @@ async function gerarArquivoTxt(conteudo, numeroPedido, customOutputDir) {
 
 async function gerarHtml(numeroPedido, options, customOutputDir) {
   const tradeName    = String(options.tradeName   || '').trim();
+  const ticketTitle  = obterTituloTicket(options.serviceMode);
   const identification = obterIdentificacaoParaImpressao({
     customerName: options.customerName || '',
     serviceMode: options.serviceMode || null,
@@ -581,7 +597,7 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Senha do Pedido ${numeroPedido}</title>
+  <title>${esc(ticketTitle)} ${numeroPedido}</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
@@ -607,7 +623,7 @@ async function gerarHtml(numeroPedido, options, customOutputDir) {
   <div class="ticket">
     ${tradeName ? `<div class="trade-name">${esc(tradeName)}</div>` : ''}
     <hr class="divider" />
-    <div class="label-senha">Senha do Pedido</div>
+    <div class="label-senha">${esc(ticketTitle)}</div>
     <div class="senha">${numeroPedido}</div>
     <hr class="divider" />
     <div class="info-line"><strong>${esc(identification.label)}:</strong> ${esc(identification.name)}</div>

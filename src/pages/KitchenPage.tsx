@@ -4,22 +4,53 @@ import { useSettings } from '@/contexts/SettingsContext';
 import { Order, OrderItem, ItemStatus, STATUS_LABELS } from '@/types/order';
 import { useAuth } from '@/contexts/AuthContext';
 import { useState, useEffect } from 'react';
+import type { SVGProps } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CheckCircle2, AlertTriangle, Clock, ChefHat, Layers,
-  Store, Armchair, CreditCard, Bike, Package, Briefcase, Building, MapPin
+  Store, CreditCard, Bike, Package, Briefcase, Building, MapPin
 } from 'lucide-react';
 import type { ServiceMode } from '@/types/order';
 
+// Tipo para agrupar pedidos por demanda
+interface OrderDemand {
+  demandId: string | null;
+  orders: Order[];
+  firstOrder: Order;
+  createdAt: Date;
+  status: 'received' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
+}
+
 function getElapsedMinutes(date: Date) {
   return Math.floor((Date.now() - date.getTime()) / 60000);
+}
+
+function MesaTableIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M4 9l4-4h8l4 4" />
+      <path d="M2 11h20" />
+      <path d="M4 11v9" />
+      <path d="M20 11v9" />
+      <path d="M8 11v6h3v-6" />
+      <path d="M16 11v6h-3v-6" />
+    </svg>
+  );
 }
 
 /** Retorna ícone e label para o tipo de atendimento (modalidade) */
 function getServiceModeConfig(mode?: ServiceMode | null) {
   const configs: Record<ServiceMode, { icon: React.ElementType; label: string; color: string }> = {
     balcao: { icon: Store, label: 'Balcão', color: 'text-blue-500' },
-    mesa: { icon: Armchair, label: 'Mesa', color: 'text-purple-500' },
+    mesa: { icon: MesaTableIcon, label: 'Mesa', color: 'text-purple-500' },
     cartao: { icon: CreditCard, label: 'Cartão', color: 'text-green-500' },
     delivery: { icon: Bike, label: 'Delivery', color: 'text-orange-500' },
     encomenda: { icon: Package, label: 'Encomenda', color: 'text-pink-500' },
@@ -46,6 +77,53 @@ const RECENT_WINDOW_HOURS = 3;
 
 function isWithinLastHours(date: Date, hours: number): boolean {
   return Date.now() - date.getTime() <= hours * 60 * 60 * 1000;
+}
+
+/**
+ * Agrupa pedidos por demandId (lote de pedidos lançados juntos).
+ * Pedidos sem demandId são agrupados individualmente.
+ */
+function groupOrdersByDemand(orders: Order[]): OrderDemand[] {
+  const groupMap = new Map<string, OrderDemand>();
+
+  for (const order of orders) {
+    // Usa demandId se disponível, caso contrário usa o ID do próprio pedido como chave única
+    const key = order.demandId || order.id;
+    
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        demandId: order.demandId || null,
+        orders: [],
+        firstOrder: order,
+        createdAt: order.createdAt,
+        status: order.status,
+      });
+    }
+
+    const demand = groupMap.get(key)!;
+    demand.orders.push(order);
+    
+    // Atualiza status e datas para refletir o estado da demanda
+    if (order.createdAt < demand.createdAt) {
+      demand.createdAt = order.createdAt;
+      demand.firstOrder = order;
+    }
+    
+    // Status é 'ready' se TODOS os pedidos estão ready
+    // Status é 'cancelled' se QUALQUER pedido está cancelled
+    if (order.status === 'cancelled') {
+      demand.status = 'cancelled';
+    } else if (demand.status !== 'cancelled') {
+      if (order.status === 'preparing' && demand.status !== 'preparing') {
+        demand.status = 'preparing';
+      } else if (order.status === 'ready' && demand.status === 'received') {
+        demand.status = 'ready';
+      }
+    }
+  }
+
+  return Array.from(groupMap.values())
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 }
 
 function Timer({ startTime, colorClass }: { startTime: Date; colorClass: string }) {
@@ -115,6 +193,7 @@ export default function KitchenPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Filtra pedidos ativos (recebidos, em preparo ou cancelados não reconhecidos)
   const activeOrders = orders
     .filter(o => (
       (o.status === 'received' || o.status === 'preparing' || (o.status === 'cancelled' && !o.cancelAcknowledgedAt)) &&
@@ -122,6 +201,10 @@ export default function KitchenPage() {
     ))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
+  // Agrupa os pedidos ativos por demanda (demandId)
+  const activeDemands = groupOrdersByDemand(activeOrders);
+
+  // Pedidos de cozinha (para contadores)
   const kitchenOrders = orders
     .filter(o => (
       (o.status === 'received' || o.status === 'preparing' || o.status === 'ready')
@@ -135,18 +218,20 @@ export default function KitchenPage() {
     o.status !== 'ready' && getElapsedMinutes(o.createdAt) > tempoCritico
   )).length;
 
-  // Pedidos filtrados para a aba de setor ativo (exclui pedidos sem itens daquele setor e pedidos com todos os itens do setor já prontos)
-  const ordersForTab = activeTab === 'all'
-    ? activeOrders.filter(o => {
-        if (o.status === 'cancelled') return true;
-        return o.items.some(it => getEffectiveItemStatus(o, it) !== 'ready');
-      })
-    : activeOrders.filter(o => {
-        const sectorItems = o.items.filter(it => it.sectorId === activeTab);
-        if (sectorItems.length === 0) return false;
-        if (o.status === 'cancelled') return true;
-        return sectorItems.some(it => getEffectiveItemStatus(o, it) !== 'ready');
-      });
+  // Filtra demandas para a aba ativa
+  const demandsForTab = activeDemands.filter(demand => {
+    if (activeTab === 'all') {
+      // Comanda completa: mostra demandas com itens não-prontos
+      return demand.orders.some(o => 
+        o.status !== 'cancelled' || !o.cancelAcknowledgedAt
+      );
+    } else {
+      // Setor específico: mostra demandas com itens daquele setor
+      return demand.orders.some(o =>
+        o.items.some(item => item.sectorId === activeTab)
+      );
+    }
+  });
 
   function getTimerColor(minutes: number): string {
     if (minutes <= tempoAlerta) return 'text-timer-ok';
@@ -166,47 +251,61 @@ export default function KitchenPage() {
     return 'bg-timer-danger/20';
   }
 
-  /** Filtra itens de um pedido conforme a aba ativa. */
-  function visibleItems(order: Order): Array<{ item: OrderItem; itemIndex: number }> {
-    if (activeTab === 'all') {
-      return order.items
-        .map((item, itemIndex) => ({ item, itemIndex }))
-        .filter(({ item }) => order.status === 'cancelled' || getEffectiveItemStatus(order, item) !== 'ready');
+  /** Obtém todos os itens da demanda, filtrados pelo setor ativo se necessário. */
+  function visibleItemsInDemand(demand: OrderDemand): Array<{ item: OrderItem; itemIndex: number; orderId: string; order: Order }> {
+    const allItems: Array<{ item: OrderItem; itemIndex: number; orderId: string; order: Order }> = [];
+
+    for (const order of demand.orders) {
+      order.items.forEach((item, itemIndex) => {
+        if (activeTab === 'all') {
+          // Comanda completa: mostra itens não-prontos
+          if (order.status !== 'cancelled' && getEffectiveItemStatus(order, item) !== 'ready') {
+            allItems.push({ item, itemIndex, orderId: order.id, order });
+          }
+        } else {
+          // Setor específico: mostra itens daquele setor não-prontos
+          if (item.sectorId === activeTab && getEffectiveItemStatus(order, item) !== 'ready') {
+            allItems.push({ item, itemIndex, orderId: order.id, order });
+          }
+        }
+      });
     }
 
-    return order.items
-      .map((item, itemIndex) => ({ item, itemIndex }))
-      .filter(({ item }) => item.sectorId === activeTab);
+    return allItems;
   }
 
-  // Mantem consistencia visual: pedido recebido nao pode mostrar item em preparo.
+  // Mantém consistência visual: pedido recebido não pode mostrar item em preparo.
   function getEffectiveItemStatus(order: Order, item: OrderItem): ItemStatus {
     if (order.status === 'received') return item.itemStatus ?? 'waiting';
     if (order.status === 'ready') return 'ready';
     return item.itemStatus ?? 'waiting';
   }
 
-  /** Conta quantos pedidos têm pelo menos um item naquele setor. */
-  function countForSector(sectorId: string): number {
-    return activeOrders.filter(o => o.items.some(it => it.sectorId === sectorId)).length;
+  /** Conta quantas demandas têm itens para um setor específico. */
+  function countDemandsForSector(sectorId: string): number {
+    return activeDemands.filter(demand =>
+      demand.orders.some(o => o.items.some(it => it.sectorId === sectorId))
+    ).length;
   }
 
-  /**
-   * Em abas de setor, o botão principal finaliza apenas os itens visíveis daquele setor.
-   * A finalização do pedido completo continua restrita à aba "Comanda Completa".
-   */
-  function markVisibleItemsReady(order: Order) {
-    const itemsToUpdate = visibleItems(order).filter(({ item }) => (item.itemStatus ?? 'waiting') !== 'ready');
-    itemsToUpdate.forEach(({ item, itemIndex }) => updateItemStatus(order.id, item.id, 'ready', itemIndex));
+  /** Marca todos os itens visíveis da demanda como prontos. */
+  function markDemandItemsReady(demand: OrderDemand) {
+    const itemsToUpdate = visibleItemsInDemand(demand)
+      .filter(({ item, order }) => (item.itemStatus ?? 'waiting') !== 'ready');
+    
+    itemsToUpdate.forEach(({ item, itemIndex, orderId }) => {
+      updateItemStatus(orderId, item.id, 'ready', itemIndex);
+    });
   }
 
-  /**
-   * Em abas de setor, marca os itens visíveis daquele setor como 'preparing'.
-   * Chamado quando clica "INICIAR PREPARO" por setor.
-   */
-  function markVisibleItemsPreparing(order: Order) {
-    const itemsToUpdate = visibleItems(order).filter(({ item }) => (item.itemStatus ?? 'waiting') !== 'preparing');
-    itemsToUpdate.forEach(({ item, itemIndex }) => updateItemStatus(order.id, item.id, 'preparing', itemIndex));
+  /** Marca todos os itens visíveis da demanda como em preparo. */
+  function markDemandItemsPreparing(demand: OrderDemand) {
+    const itemsToUpdate = visibleItemsInDemand(demand)
+      .filter(({ item }) => (item.itemStatus ?? 'waiting') !== 'preparing');
+    
+    itemsToUpdate.forEach(({ item, itemIndex, orderId }) => {
+      updateItemStatus(orderId, item.id, 'preparing', itemIndex);
+    });
   }
 
   return (
@@ -257,11 +356,11 @@ export default function KitchenPage() {
           <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
             activeTab === 'all' ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
           }`}>
-            {activeOrders.length}
+            {activeDemands.length}
           </span>
         </button>
 
-        {/* Abas dos setores vindos do SQL */}
+        {/* Abas dos setores */}
         {sectors.map(sector => (
           <button
             key={sector.id}
@@ -276,26 +375,34 @@ export default function KitchenPage() {
             <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
               activeTab === sector.id ? 'bg-white/20 text-white' : 'bg-muted text-muted-foreground'
             }`}>
-              {countForSector(sector.id)}
+              {countDemandsForSector(sector.id)}
             </span>
           </button>
         ))}
       </div>
 
-      {/* Grid de pedidos */}
+      {/* Grid de demandas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <AnimatePresence>
-          {ordersForTab.map(order => {
-            const minutes = getElapsedMinutes(order.createdAt);
-            const items = visibleItems(order);
-            const isCancelled = order.status === 'cancelled';
+          {demandsForTab.map(demand => {
+            const minutes = getElapsedMinutes(demand.createdAt);
+            const items = visibleItemsInDemand(demand);
+            
+            // Uma demanda é cancelada se TODOS os pedidos estão cancelados
+            const isCancelled = demand.orders.every(o => o.status === 'cancelled');
             const isCritical = !isCancelled && minutes > tempoCritico;
-            const sectorItemStatuses = items.map(({ item }) => getEffectiveItemStatus(order, item));
-            const allSectorWaiting = sectorItemStatuses.length > 0 && sectorItemStatuses.every(status => status === 'waiting');
+            
+            // Status efetivo da demanda
+            const demandStatus = demand.status;
+            const demandNumbers = demand.orders.map(o => o.number).join(', ');
+            
+            // Item statuses
+            const itemStatuses = items.map(({ item, order }) => getEffectiveItemStatus(order, item));
+            const allWaiting = itemStatuses.length > 0 && itemStatuses.every(status => status === 'waiting');
 
             return (
               <motion.div
-                key={`${order.id}-${activeTab}`}
+                key={demand.demandId || demand.orders[0].id}
                 layout
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -311,15 +418,16 @@ export default function KitchenPage() {
                 {/* Header */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-3xl font-black">{order.number}</span>
+                    <span className="text-2xl font-black">{demandNumbers}</span>
                     {(() => {
-                      const modeConfig = getServiceModeConfig(order.serviceMode);
+                      const modeConfig = getServiceModeConfig(demand.firstOrder.serviceMode);
                       if (!modeConfig) return null;
                       const ModeIcon = modeConfig.icon;
                       return (
                         <div
                           className={`flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border ${modeConfig.color}`}
                           title={modeConfig.label}
+                          aria-label={modeConfig.label}
                         >
                           <ModeIcon className="w-4 h-4" />
                           <span className="text-xs font-semibold hidden sm:inline">{modeConfig.label}</span>
@@ -327,146 +435,148 @@ export default function KitchenPage() {
                       );
                     })()}
                   </div>
-                  <Timer startTime={order.createdAt} colorClass={getTimerColor(minutes)} />
+                  <Timer startTime={demand.createdAt} colorClass={getTimerColor(minutes)} />
                 </div>
 
                 <p className="text-xs text-muted-foreground -mt-2">
-                  Pedido as {order.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  Realizado às: {demand.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                 </p>
 
-                {order.externalId && (
+                {demand.demandId && (
                   <p className="text-xs text-muted-foreground -mt-2">
-                    Lancamento #{order.externalId}
+                    Pedido nº: {demand.demandId.split(':')[0]}
                   </p>
                 )}
 
-                {/* Status do pedido */}
+                {/* Status da demanda */}
                 <div className={`inline-flex self-start items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
                   isCancelled ? 'bg-status-cancelled text-primary-foreground'
-                  : order.status === 'received' ? 'bg-status-received text-primary-foreground'
-                  : order.status === 'preparing' ? 'bg-status-preparing text-primary-foreground'
+                  : demandStatus === 'received' ? 'bg-status-received text-primary-foreground'
+                  : demandStatus === 'preparing' ? 'bg-status-preparing text-primary-foreground'
                   : 'bg-status-ready text-primary-foreground'
                 }`}>
                   {isCancelled ? <AlertTriangle className="w-3.5 h-3.5" />
-                    : order.status === 'received' ? <Clock className="w-3.5 h-3.5" />
-                    : order.status === 'preparing' ? <ChefHat className="w-3.5 h-3.5" />
+                    : demandStatus === 'received' ? <Clock className="w-3.5 h-3.5" />
+                    : demandStatus === 'preparing' ? <ChefHat className="w-3.5 h-3.5" />
                     : <CheckCircle2 className="w-3.5 h-3.5" />}
-                  {STATUS_LABELS[order.status]}
+                  {STATUS_LABELS[demandStatus]}
                 </div>
 
-                {order.cookId && (
-                  <p className="text-sm text-muted-foreground -mt-2">Cozinheiro: {order.cookId}</p>
-                )}
-
-                {order.attendant && order.serviceMode && (
+                {/* Responsável (garçom/mesa) */}
+                {demand.firstOrder.attendant && demand.firstOrder.serviceMode && (
                   <p className={`text-sm font-semibold -mt-2 ${
-                    order.serviceMode === 'mesa' ? 'text-blue-600 dark:text-blue-400'
-                    : order.serviceMode === 'cartao' ? 'text-green-600 dark:text-green-400'
-                    : order.serviceMode === 'apartamento' ? 'text-indigo-600 dark:text-indigo-400'
-                    : order.serviceMode === 'servico' ? 'text-cyan-600 dark:text-cyan-400'
+                    demand.firstOrder.serviceMode === 'mesa' ? 'text-blue-600 dark:text-blue-400'
+                    : demand.firstOrder.serviceMode === 'cartao' ? 'text-green-600 dark:text-green-400'
+                    : demand.firstOrder.serviceMode === 'apartamento' ? 'text-indigo-600 dark:text-indigo-400'
+                    : demand.firstOrder.serviceMode === 'servico' ? 'text-cyan-600 dark:text-cyan-400'
                     : 'text-muted-foreground'
                   }`}>
                     {getResponsibleDisplayName({
-                      serviceMode: order.serviceMode,
-                      attendant: order.attendant,
-                      sellerName: order.sellerName,
+                      serviceMode: demand.firstOrder.serviceMode,
+                      attendant: demand.firstOrder.attendant,
+                      sellerName: demand.firstOrder.sellerName,
                     })}
                   </p>
                 )}
 
-                {order.integratorName && (
+                {demand.firstOrder.integratorName && (
                   <div className="-mt-2 inline-flex self-start items-center gap-1.5 px-2.5 py-1 rounded-md border border-orange-200 bg-orange-50 text-orange-700 text-xs font-bold">
-                    Integradora: {order.integratorName}
+                    Integradora: {demand.firstOrder.integratorName}
                   </div>
                 )}
 
-                {/* Itens (filtrados pelo setor ativo) */}
+                {/* Itens da demanda */}
                 <div className="space-y-3 flex-1">
-                  {items.map(({ item, itemIndex }) => (
-                    <div key={`${item.id}-${itemIndex}`} className="space-y-1">
+                  {items.map(({ item, itemIndex, orderId, order }, idx) => (
+                    <div key={`${orderId}-${itemIndex}-${idx}`} className="space-y-1">
                       {(() => {
                         const itemStatus = getEffectiveItemStatus(order, item);
                         const canChangeItemStatus = order.status === 'preparing' && activeTab !== 'all' && item.sectorId === activeTab;
 
                         return (
-                      <div className="flex items-start gap-2">
-                        <span className="bg-secondary rounded-md w-7 h-7 flex items-center justify-center text-sm font-bold shrink-0 mt-0.5">
-                          {item.quantity}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium">{item.name}</span>
-                            {!isCancelled && (
-                              <ItemStatusToggle
-                                item={item}
-                                itemIndex={itemIndex}
-                                orderId={order.id}
-                                current={itemStatus}
-                                disabled={!canChangeItemStatus}
-                                onToggle={updateItemStatus}
-                              />
-                            )}
+                          <div className="flex items-start gap-2">
+                            <span className="bg-secondary rounded-md w-7 h-7 flex items-center justify-center text-sm font-bold shrink-0 mt-0.5">
+                              {item.quantity}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium">{item.name}</span>
+                                {!isCancelled && (
+                                  <ItemStatusToggle
+                                    item={item}
+                                    itemIndex={itemIndex}
+                                    orderId={orderId}
+                                    current={itemStatus}
+                                    disabled={!canChangeItemStatus}
+                                    onToggle={updateItemStatus}
+                                  />
+                                )}
+                              </div>
+                              {formatItemNote(item.notes) && (
+                                <p className="text-xs text-muted-foreground leading-tight mt-0.5">
+                                  Obs: {formatItemNote(item.notes)}
+                                </p>
+                              )}
+                            </div>
                           </div>
-                          {formatItemNote(item.notes) && (
-                            <p className="text-xs text-muted-foreground leading-tight mt-0.5">
-                              Obs: {formatItemNote(item.notes)}
-                            </p>
-                          )}
-                        </div>
-                      </div>
                         );
                       })()}
                     </div>
                   ))}
                 </div>
 
-                {/* Observações do pedido */}
-                {order.observations && (
+                {/* Observações */}
+                {demand.orders.some(o => o.observations) && (
                   <div className="bg-secondary/50 rounded-lg p-3 text-sm">
-                    <span className="font-semibold text-primary">OBS:</span> {order.observations}
+                    <span className="font-semibold text-primary">OBS:</span>{' '}
+                    {demand.orders.filter(o => o.observations).map(o => o.observations).join(' | ')}
                   </div>
                 )}
 
-                {/* Ação do pedido */}
+                {/* Ação da demanda */}
                 {isCancelled ? (
                   <div className="flex flex-col gap-2">
                     <button
-                      onClick={() => acknowledgeCancelledOrder(order.id)}
+                      onClick={() => {
+                        // Reconhecer cancelamento de todos os pedidos da demanda
+                        demand.orders.forEach(o => acknowledgeCancelledOrder(o.id));
+                      }}
                       className="w-full py-3 rounded-lg bg-status-cancelled text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98]"
                     >
-                      OK — Pedido Cancelado
+                      OK — Demanda Cancelada
                     </button>
                   </div>
-                ) : activeTab !== 'all' && allSectorWaiting ? (
+                ) : activeTab !== 'all' && allWaiting ? (
+                  <button
+                    onClick={() => markDemandItemsPreparing(demand)}
+                    className="w-full py-3 rounded-lg bg-status-preparing text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98]"
+                  >
+                    INICIAR PREPARO
+                  </button>
+                ) : demandStatus === 'received' ? (
                   <button
                     onClick={() => {
-                      // Em setor, inicia preparo apenas dos itens daquele setor.
-                      markVisibleItemsPreparing(order);
+                      // Inicia todos os pedidos da demanda
+                      demand.orders.forEach(o => updateStatus(o.id, 'preparing', username || undefined));
                     }}
                     className="w-full py-3 rounded-lg bg-status-preparing text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98]"
                   >
                     INICIAR PREPARO
                   </button>
-                ) : order.status === 'received' ? (
+                ) : demandStatus === 'preparing' && activeTab !== 'all' ? (
                   <button
-                    onClick={() => updateStatus(order.id, 'preparing', username || undefined)}
-                    className="w-full py-3 rounded-lg bg-status-preparing text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98]"
-                  >
-                    INICIAR PREPARO
-                  </button>
-                ) : order.status === 'preparing' && activeTab !== 'all' ? (
-                  // Em visualização de setor + preparando: marca items visíveis como prontos
-                  <button
-                    onClick={() => markVisibleItemsReady(order)}
+                    onClick={() => markDemandItemsReady(demand)}
                     className="w-full py-3 rounded-lg bg-status-ready text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98] flex items-center justify-center gap-2"
                   >
                     <CheckCircle2 className="w-5 h-5" />
                     ITEM PRONTO
                   </button>
-                ) : order.status === 'preparing' && activeTab === 'all' ? (
-                  // Em comanda completa + preparando: marca o pedido inteiro como pronto
+                ) : demandStatus === 'preparing' && activeTab === 'all' ? (
                   <button
-                    onClick={() => updateStatus(order.id, 'ready')}
+                    onClick={() => {
+                      // Marca a demanda inteira como pronta (todos os pedidos)
+                      demand.orders.forEach(o => updateStatus(o.id, 'ready'));
+                    }}
                     className="w-full py-3 rounded-lg bg-status-ready text-primary-foreground font-bold text-lg hover:opacity-90 transition-opacity active:scale-[0.98] flex items-center justify-center gap-2"
                   >
                     <CheckCircle2 className="w-5 h-5" />
@@ -479,14 +589,14 @@ export default function KitchenPage() {
         </AnimatePresence>
       </div>
 
-      {ordersForTab.length === 0 && (
+      {demandsForTab.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
           <CheckCircle2 className="w-16 h-16 mb-4 text-status-ready" />
           <p className="text-xl font-medium">
-            {activeTab === 'all' ? 'Nenhum pedido pendente!' : `Nenhum pedido para este setor`}
+            {activeTab === 'all' ? 'Nenhuma demanda pendente!' : `Nenhuma demanda para este setor`}
           </p>
           <p className="text-sm">
-            {activeTab === 'all' ? 'Todos os pedidos foram finalizados' : 'Aguardando novos pedidos...'}
+            {activeTab === 'all' ? 'Todas as demandas foram finalizadas' : 'Aguardando novos pedidos...'}
           </p>
         </div>
       )}

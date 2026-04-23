@@ -21,6 +21,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   externalId?: string | null;
+  demandId?: string | null;
   number: number;
   customerName: string;
   serviceMode?: ServiceMode | null;

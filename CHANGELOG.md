@@ -7,6 +7,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/spec
 
 ## [Unreleased]
 
+## [2.0.4] - 2026-04-22
+
+### Corrigido
+- Persistencia de sons reforcada no frontend e backend: defaults validos, migracao de caminho legado e fallback consistente ao iniciar.
+- Relatorios operacionais: removida coluna "Pedidos produzidos" para reduzir poluicao visual no painel e nas exportacoes.
+- Exportacao PDF do relatorio redesenhada com identidade FOX KDS, cabecalho visual, bordas arredondadas e nome do restaurante.
+
+### Alterado
+- Versao do app atualizada para `2.0.4` e sincronizada com `src/lib/version.ts`.
+
 ## [2.0.3] - 2026-04-22
 
 ### Corrigido

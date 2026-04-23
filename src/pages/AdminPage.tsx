@@ -1,8 +1,22 @@
 import { useOrders } from '@/contexts/OrderContext';
-import { Order, OrderStatus, STATUS_LABELS, OrderItem, ItemStatus } from '@/types/order';
+import { Order, OrderStatus, STATUS_LABELS, OrderItem, ItemStatus, ServiceMode } from '@/types/order';
 import { useEffect, useMemo, useState } from 'react';
+import type { SVGProps } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, ChefHat, CheckCircle2, Package, XCircle, Search, Printer } from 'lucide-react';
+import {
+  Clock,
+  ChefHat,
+  CheckCircle2,
+  Package,
+  XCircle,
+  Search,
+  Printer,
+  Store,
+  CreditCard,
+  Bike,
+  Briefcase,
+  Building,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +41,41 @@ const PREV_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   ready: 'preparing',
   delivered: 'ready',
 };
+
+function MesaTableIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M4 9l4-4h8l4 4" />
+      <path d="M2 11h20" />
+      <path d="M4 11v9" />
+      <path d="M20 11v9" />
+      <path d="M8 11v6h3v-6" />
+      <path d="M16 11v6h-3v-6" />
+    </svg>
+  );
+}
+
+function getServiceModeConfig(mode?: ServiceMode | null) {
+  const configs: Record<ServiceMode, { icon: React.ElementType; label: string; colorClass: string }> = {
+    balcao: { icon: Store, label: 'Balcão', colorClass: 'text-blue-500' },
+    mesa: { icon: MesaTableIcon, label: 'Mesa', colorClass: 'text-purple-500' },
+    cartao: { icon: CreditCard, label: 'Cartão', colorClass: 'text-green-500' },
+    delivery: { icon: Bike, label: 'Delivery', colorClass: 'text-orange-500' },
+    encomenda: { icon: Package, label: 'Encomenda', colorClass: 'text-pink-500' },
+    servico: { icon: Briefcase, label: 'Serviço', colorClass: 'text-cyan-500' },
+    apartamento: { icon: Building, label: 'Apartamento', colorClass: 'text-indigo-500' },
+  };
+
+  return mode && configs[mode] ? configs[mode] : null;
+}
 
 // Opcoes fixas para manter UX previsivel e evitar entradas arbitrarias.
 const PAGE_SIZE_OPTIONS = [5, 10, 15, 20, 25, 30] as const;
@@ -304,6 +353,8 @@ export default function AdminPage() {
               {paginatedOrders.map(order => {
                 const cfg = statusConfig[order.status];
                 const Icon = cfg.icon;
+                const modeConfig = getServiceModeConfig(order.serviceMode);
+                const ServiceModeIcon = modeConfig?.icon;
                 return (
                   <motion.div
                     key={order.id}
@@ -316,9 +367,19 @@ export default function AdminPage() {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-lg">{order.number}</span>
+                          {ServiceModeIcon && (
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border ${modeConfig?.colorClass}`}
+                              title={modeConfig?.label}
+                              aria-label={modeConfig?.label}
+                            >
+                              <ServiceModeIcon className="w-4 h-4" />
+                              <span className="text-xs font-semibold">{modeConfig?.label}</span>
+                            </span>
+                          )}
                           {order.externalId && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-                              Lancamento #{order.externalId}
+                              Pedido nº: {order.externalId}
                             </span>
                           )}
                           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-primary-foreground ${cfg.colorClass}`}>
@@ -426,6 +487,8 @@ export default function AdminPage() {
                   {paginatedOrders.map(order => {
                     const cfg = statusConfig[order.status];
                     const Icon = cfg.icon;
+                    const modeConfig = getServiceModeConfig(order.serviceMode);
+                    const ServiceModeIcon = modeConfig?.icon;
                     return (
                       <motion.tr
                         key={order.id}
@@ -435,9 +498,21 @@ export default function AdminPage() {
                         className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
                       >
                         <td className="p-4">
-                          <div className="font-bold text-lg">{order.number}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="font-bold text-lg">{order.number}</div>
+                            {ServiceModeIcon && (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border ${modeConfig?.colorClass}`}
+                                title={modeConfig?.label}
+                                aria-label={modeConfig?.label}
+                              >
+                                <ServiceModeIcon className="w-4 h-4" />
+                                <span className="text-xs font-semibold">{modeConfig?.label}</span>
+                              </span>
+                            )}
+                          </div>
                           {order.externalId && (
-                            <div className="text-xs text-muted-foreground">Lancamento #{order.externalId}</div>
+                            <div className="text-xs text-muted-foreground">Pedido nº: {order.externalId}</div>
                           )}
                         </td>
                         <td className="p-4">{getAdminCustomerName(order.customerName)}</td>

@@ -49,7 +49,10 @@ const normalizeServiceMode = (value: unknown): ServiceMode | null => {
   return aliases[normalized] || null;
 };
 
-const getOrderIdentityKey = (order: Partial<Order> & { id?: string | null; externalId?: string | null }) => {
+const getOrderIdentityKey = (order: Partial<Order> & { id?: string | null; externalId?: string | null; demandId?: string | null }) => {
+  const demandId = String((order as any).demandId || '').trim();
+  if (demandId) return `demand:${demandId}`;
+
   const externalId = String(order.externalId || '').trim();
   if (externalId.includes('::')) {
     const baseExternalId = externalId.split('::')[0].trim();
