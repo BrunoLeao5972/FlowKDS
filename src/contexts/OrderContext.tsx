@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { Order, OrderStatus, Sector, ItemStatus, ServiceMode } from '@/types/order';
 import { useSettings } from './SettingsContext';
@@ -117,6 +117,9 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   const [sectors, setSectors] = useState<Sector[]>([]);
   const settings = useSettings();
   const { token, isAuthenticated, logout } = useAuth();
+
+  // Ref para rastrear pedidos que chegaram com status 'received' e precisam de autoPrep
+  const autoPrepQueueRef = useRef<Set<string>>(new Set());
 
   // Em produção, frontend e API usam o mesmo domínio.
   // Em desenvolvimento local, a API roda na 8081.
@@ -635,10 +638,17 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           // Toca som de novo pedido quando habilitado nas preferências.
           try {
             if (settings?.newOrderSoundEnabled && settings.newOrderSound) {
-              const a = new Audio(settings.newOrderSound);
+              const soundUrl = decodeURI(settings.newOrderSound);
+              const a = new Audio(soundUrl);
               a.play().catch(() => {});
             }
           } catch (e) {}
+
+          // Se preparo automático está ativado, adiciona à fila para processamento
+          if (settings?.autoPrep && normalized.status === 'received') {
+            autoPrepQueueRef.current.add(normalized.id);
+          }
+
           return sortOrdersByCreatedAt([...prev, normalized]);
         });
       });
@@ -675,7 +685,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           try {
             if (normalized.status === 'ready' && previousOrder.status !== 'ready') {
               if (settings?.readyOrderSoundEnabled && settings.readyOrderSound) {
-                const a = new Audio(settings.readyOrderSound);
+                const soundUrl = decodeURI(settings.readyOrderSound);
+                const a = new Audio(soundUrl);
                 a.play().catch(() => {});
               }
             }
@@ -696,6 +707,23 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       if (socket) socket.disconnect();
     };
   }, [API_BASE, authHeaders, isAuthenticated, isOrderAllowedByServiceMode, logout, settings, token]);
+
+  // Processa a fila de autoPrep quando novos pedidos chegam ou a fila muda
+  useEffect(() => {
+    if (autoPrepQueueRef.current.size === 0) return;
+
+    // Processa cada pedido na fila
+    const idsToProcess = Array.from(autoPrepQueueRef.current);
+    autoPrepQueueRef.current.clear();
+
+    idsToProcess.forEach(id => {
+      // Verifica se o pedido ainda existe e está com status 'received'
+      const order = orders.find(o => o.id === id);
+      if (order && order.status === 'received') {
+        updateStatus(id, 'preparing');
+      }
+    });
+  }, [orders, updateStatus]);
 
   return (
     <OrderContext.Provider value={{ orders, sectors, addOrder, updateStatus, updateItemStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime, printOrderTicket, reprintOrderTicket }}>

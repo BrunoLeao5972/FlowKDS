@@ -57,13 +57,15 @@ interface ConfigDialogProps {
     panelServiceModes: ServiceMode[],
     panelColor: string,
     panelCallSound: string | null,
-    panelCallEnabled: boolean
+    panelCallEnabled: boolean,
+    autoPrep: boolean
   ) => void;
   ThemeToggle: React.ReactNode;
   orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
   customStartNumber: number;
   enabledServiceModes: ServiceMode[];
   panelEnabledServiceModes: ServiceMode[];
+  autoPrep: boolean;
 }
 
 type ServiceMode = 'balcao' | 'mesa' | 'cartao' | 'delivery' | 'encomenda' | 'servico' | 'apartamento';
@@ -257,7 +259,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [readyOrderSoundData, setReadyOrderSoundDataLocal] = useState<string | null>(settings.readyOrderSound || null);
   const [newOrderEnabled, setNewOrderEnabledLocal] = useState<boolean>(settings.newOrderSoundEnabled ?? true);
   const [readyEnabled, setReadyEnabledLocal] = useState<boolean>(settings.readyOrderSoundEnabled ?? true);
-  const [panelCallSoundData, setPanelCallSoundDataLocal] = useState<string | null>(settings.panelCallSound || null);
+  const [panelCallSoundData, setPanelCallSoundDataLocal] = useState<string | null>(settings.panelCallSound || '/Songs/Efeito Sonoro - Painel de Retirada.mp3');
   const [panelCallEnabled, setPanelCallEnabledLocal] = useState<boolean>(settings.panelCallSoundEnabled ?? true);
 
   // Wrappers que persistem imediatamente no SettingsContext (sem precisar clicar em Salvar)
@@ -280,6 +282,9 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
 
   // Estado para cor do painel
   const [panelColorLocal, setPanelColorLocal] = useState<string>(panelColor || '#FF6B35');
+
+  // Estado para preparo automático
+  const [autoPrepLocal, setAutoPrepLocal] = useState<boolean>(settings?.autoPrep ?? false);
 
   // Lista de usuários carregada da API e paginação dos painéis de Usuários e Permissões
   const [users, setUsers] = useState<UserData[]>([]);
@@ -1201,7 +1206,8 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       selectedPanelServiceModes,
       panelColorLocal,
       panelCallSoundData,
-      panelCallEnabled
+      panelCallEnabled,
+      autoPrepLocal
     );
   };
 
@@ -1522,6 +1528,32 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                 <p className="text-xs text-muted-foreground">
                   Prefixos aceitos no nome da impressora: IMPRESSORA:, HTML: ou FILE:. Sem prefixo, o sistema considera IMPRESSORA e envia direto para o Windows.
                 </p>
+              </div>
+
+              <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">
+                <p className="text-sm font-medium">Configurações de Cozinha</p>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="autoPrep" className="text-sm font-medium cursor-pointer">
+                      ⚡ Preparo Automático
+                    </label>
+                    <div className="group relative inline-flex">
+                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-muted-foreground/40 text-[11px] font-bold text-muted-foreground cursor-help select-none">
+                        ?
+                      </span>
+                      <span className="pointer-events-none absolute z-20 hidden group-hover:block w-72 rounded-md bg-zinc-900 text-white text-[11px] leading-snug p-2 shadow-lg bottom-[120%] right-0">
+                        Quando ativado, novos pedidos automaticamente iniciam o preparo sem necessidade do clique no botão "Iniciar Preparo". O cozinheiro apenas clica em "Produto Pronto" ou "Pedido Pronto" conforme vai finalizando.
+                      </span>
+                    </div>
+                  </div>
+                  <input
+                    id="autoPrep"
+                    type="checkbox"
+                    className="w-5 h-5 accent-orange-500 cursor-pointer"
+                    checked={autoPrepLocal}
+                    onChange={e => setAutoPrepLocal(e.target.checked)}
+                  />
+                </div>
               </div>
             </div>
           )}

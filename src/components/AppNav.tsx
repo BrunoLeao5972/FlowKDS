@@ -64,6 +64,8 @@ export function AppNav() {
     setPanelEnabledServiceModes,
     panelColor,
     setPanelColor,
+    autoPrep,
+    setAutoPrep,
   } = useSettings();
 
   const getApiBase = () => {
@@ -103,6 +105,7 @@ export function AppNav() {
     panelEnabledServiceModes: string[];
     panelColor: string;
     animationsEnabled: boolean;
+    autoPrep: boolean;
   }) => {
     try {
       const token = localStorage.getItem('kds_auth_token') || '';
@@ -209,7 +212,8 @@ export function AppNav() {
             panelServiceModes,
             panelColorParam,
             panelCallSound,
-            panelCallEnabled
+            panelCallEnabled,
+            autoPrep
           ) => {
             setTempoMedio(medio);
             setTempoCritico(critico);
@@ -256,6 +260,7 @@ export function AppNav() {
               panelEnabledServiceModes: panelServiceModes,
               panelColor: panelColorParam,
               animationsEnabled: true,
+              autoPrep,
             });
             setLicenseFileName(licenseFileName);
             setLicenseContent(licenseContent);
@@ -272,6 +277,7 @@ export function AppNav() {
             setEnabledServiceModes(serviceModes);
             setPanelEnabledServiceModes(panelServiceModes);
             setPanelColor(panelColorParam);
+            setAutoPrep(autoPrep);
             // if user enabled daily-reset or custom-start, update last reset date to today so numbering starts immediately
             if (orderMode === 'daily-reset' || orderMode === 'custom-start') touchResetDate();
             setShowConfig(false);
@@ -279,6 +285,7 @@ export function AppNav() {
           ThemeToggle={<ThemeToggle />}
           enabledServiceModes={enabledServiceModes}
           panelEnabledServiceModes={panelEnabledServiceModes}
+          autoPrep={autoPrep}
         />
       )}
     </>

@@ -713,6 +713,7 @@ function normalizeRestaurantPayload(payload) {
     panelEnabledServiceModes: Array.isArray(raw.panelEnabledServiceModes)
       ? raw.panelEnabledServiceModes.map(m => String(m).trim()).filter(Boolean)
       : [],
+    autoPrep: toSafeBoolean(raw.autoPrep, false),
   };
 }
 
@@ -986,6 +987,7 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
       animationsEnabled: true,
       enabledServiceModes: [],
       panelEnabledServiceModes: ['balcao', 'delivery', 'encomenda'],
+      autoPrep: false,
       updatedAt: null,
       updatedBy: null,
     });
@@ -1021,6 +1023,7 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     animationsEnabled: existing.animationsEnabled ?? true,
     enabledServiceModes: existing.enabledServiceModes || [],
     panelEnabledServiceModes: existing.panelEnabledServiceModes || ['balcao', 'delivery', 'encomenda'],
+    autoPrep: existing.autoPrep ?? false,
     updatedAt: existing.updatedAt || null,
     updatedBy: existing.updatedBy || null,
   });
@@ -1083,6 +1086,7 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     animationsEnabled: saved.animationsEnabled ?? true,
     enabledServiceModes: saved.enabledServiceModes || [],
     panelEnabledServiceModes: saved.panelEnabledServiceModes || ['balcao', 'delivery', 'encomenda'],
+    autoPrep: saved.autoPrep ?? false,
     updatedAt: saved.updatedAt || null,
     updatedBy: saved.updatedBy || null,
   });
@@ -2024,6 +2028,11 @@ app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
 
   if (targetIndex === -1) return res.status(404).json({ error: 'item_not_found' });
 
+  // Captura o username do usuário autenticado que está mudando o status do item
+  const authPermissions = req.authUser?.permissions || [];
+  const actorCookId = authPermissions.includes('kitchen') ? req.authUser?.username : null;
+  const resolvedCookId = actorCookId || order.cookId || null;
+
   const now = Date.now();
   const updatedItems = order.items.map((it, idx) =>
     idx === targetIndex ? { ...it, itemStatus } : it
@@ -2064,6 +2073,8 @@ app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
     if (order.status !== 'preparing') {
       patch.startedAtHistory = [...(order.startedAtHistory || []), now];
     }
+    // Atualiza o cookId quando um item é marcado como em preparo
+    if (resolvedCookId && !order.cookId) patch.cookId = resolvedCookId;
   }
 
   if (derivedOrderStatus === 'ready' && !order.readyAt) {
@@ -2073,7 +2084,7 @@ app.patch('/orders/:id/items/:itemId/status', asyncHandler(async (req, res) => {
   if (derivedOrderStatus !== order.status) {
     patch.stageEvents = [
       ...(order.stageEvents || []),
-      { status: derivedOrderStatus, at: now, cookId: order.cookId || null },
+      { status: derivedOrderStatus, at: now, cookId: resolvedCookId },
     ];
   }
 

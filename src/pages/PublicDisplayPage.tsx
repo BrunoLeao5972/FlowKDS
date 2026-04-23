@@ -38,6 +38,25 @@ function normalizeServiceMode(value: unknown): ServiceMode | null {
 }
 
 /**
+ * Retorna o número a exibir para o pedido no painel de retirada.
+ * Para delivery/encomenda: últimos 3 dígitos do lancamentoId
+ * Para outros: order.number
+ */
+function getDisplayOrderNumber(order: any): string {
+  const mode = order.serviceMode;
+  const isDeliveryOrEncomenda = mode === 'delivery' || mode === 'encomenda';
+
+  if (isDeliveryOrEncomenda) {
+    const digits = String(order.lancamentoId || '').replace(/\D/g, '');
+    if (digits.length >= 3) {
+      return digits.slice(-3);
+    }
+  }
+
+  return String(order.number);
+}
+
+/**
  * Mantido como wrapper leve para a página pública.
  */
 function ThemeLoadingGuard({ children }: React.PropsWithChildren) {
@@ -73,7 +92,7 @@ function OrderCard({ order, variant }: OrderCardProps) {
             className="text-4xl md:text-5xl font-black block"
             style={{ color: variant === 'preparing' ? 'var(--color-primary)' : 'var(--color-success)' }}
           >
-            {order.number}
+            {getDisplayOrderNumber(order)}
           </span>
           <p className="text-base md:text-lg mt-1 tema-text-secondary font-medium break-words">
             {getPanelCustomerName(order.customerName)}
@@ -84,7 +103,7 @@ function OrderCard({ order, variant }: OrderCardProps) {
           className="text-[2.5rem] md:text-[3.2rem] font-black block py-1"
           style={{ color: variant === 'preparing' ? 'var(--color-primary)' : 'var(--color-success)' }}
         >
-          {order.number}
+          {getDisplayOrderNumber(order)}
         </span>
       )}
     </motion.div>
@@ -167,7 +186,9 @@ function PublicDisplayContent() {
 
     if (hasNew && settings.panelCallSoundEnabled && settings.panelCallSound) {
       try {
-        new Audio(settings.panelCallSound).play().catch(() => {});
+        // Decodifica a URL para remover encoding (ex: %20 -> espaço)
+        const soundUrl = decodeURI(settings.panelCallSound);
+        new Audio(soundUrl).play().catch(() => {});
       } catch {
         // ignore autoplay restrictions
       }

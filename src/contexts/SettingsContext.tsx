@@ -37,6 +37,9 @@ type Settings = {
   lastResetDate: string | null; // ISO date (YYYY-MM-DD)
   enabledServiceModes: ServiceMode[];
   panelEnabledServiceModes: ServiceMode[];
+  // automatic preparation: when enabled, new orders automatically transition to 'preparing' status
+  autoPrep: boolean;
+  setAutoPrep: (v: boolean) => void;
   setTempoMedio: (v: number) => void;
   setTempoAlerta: (v: number) => void;
   setTempoCritico: (v: number) => void;
@@ -79,6 +82,7 @@ const STORAGE_KEY = 'kds:settings:v1';
 const FIXED_PRINT_SCALE = 115;
 const DEFAULT_NEW_ORDER_SOUND = '/Songs/Efeito Sonoro - Chegou Pedido.mp3';
 const DEFAULT_READY_ORDER_SOUND = '/Songs/Efeito Sonoro - Pedido Pronto.mp3';
+const DEFAULT_PANEL_CALL_SOUND = '/Songs/Efeito Sonoro - Painel de Retirada.mp3';
 
 function normalizeSoundSource(value: unknown, fallback: string): string {
   const raw = String(value || '').trim();
@@ -110,7 +114,7 @@ const defaultValues: Settings = {
   readyOrderSound: DEFAULT_READY_ORDER_SOUND,
   newOrderSoundEnabled: true,
   readyOrderSoundEnabled: true,
-  panelCallSound: DEFAULT_READY_ORDER_SOUND,
+  panelCallSound: DEFAULT_PANEL_CALL_SOUND,
   panelCallSoundEnabled: true,
   printerName: '',
   printSize: '80mm',
@@ -150,6 +154,8 @@ const defaultValues: Settings = {
   setPanelColor: () => {},
   animationsEnabled: true,
   setAnimationsEnabled: () => {},
+  autoPrep: false,
+  setAutoPrep: () => {},
   computeNextNumber: () => 101,
   touchResetDate: () => {},
 };
@@ -200,6 +206,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [panelEnabledServiceModes, setPanelEnabledServiceModes] = useState<ServiceMode[]>(defaultValues.panelEnabledServiceModes);
   const [panelColor, setPanelColor] = useState<string>(defaultValues.panelColor);
   const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(true);
+  const [autoPrep, setAutoPrep] = useState<boolean>(false);
 
   // Carrega preferências locais e faz migração leve de campos legados.
   useEffect(() => {
@@ -252,12 +259,13 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (typeof parsed.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(parsed.newOrderSoundEnabled);
         if (typeof parsed.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(parsed.readyOrderSoundEnabled);
         if (Object.prototype.hasOwnProperty.call(parsed, 'panelCallSound')) {
-          setPanelCallSound(normalizeSoundSource(parsed.panelCallSound, DEFAULT_READY_ORDER_SOUND));
+          setPanelCallSound(normalizeSoundSource(parsed.panelCallSound, DEFAULT_PANEL_CALL_SOUND));
         }
         if (typeof parsed.panelCallSoundEnabled === 'boolean') setPanelCallSoundEnabled(parsed.panelCallSoundEnabled);
         if (typeof parsed.printerName === 'string') setPrinterName(parsed.printerName);
         if (parsed.printSize === '58mm' || parsed.printSize === '80mm' || parsed.printSize === 'A4') setPrintSize(parsed.printSize);
         if (typeof parsed.panelColor === 'string') setPanelColor(parsed.panelColor);
+        if (typeof parsed.autoPrep === 'boolean') setAutoPrep(parsed.autoPrep);
         setPrintScale(FIXED_PRINT_SCALE);
       }
     } catch (e) {
@@ -306,7 +314,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (typeof data.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(data.newOrderSoundEnabled);
         if (typeof data.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(data.readyOrderSoundEnabled);
         if (typeof data.panelCallSound === 'string' || data.panelCallSound === null) {
-          setPanelCallSound(normalizeSoundSource(data.panelCallSound, DEFAULT_READY_ORDER_SOUND));
+          setPanelCallSound(normalizeSoundSource(data.panelCallSound, DEFAULT_PANEL_CALL_SOUND));
         }
         if (typeof data.panelCallSoundEnabled === 'boolean') setPanelCallSoundEnabled(data.panelCallSoundEnabled);
         if (typeof data.printerName === 'string') setPrinterName(data.printerName);
@@ -314,6 +322,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         if (typeof data.printScale === 'number' && Number.isFinite(data.printScale)) setPrintScale(data.printScale);
         if (typeof data.panelColor === 'string') setPanelColor(data.panelColor);
         if (typeof data.animationsEnabled === 'boolean') setAnimationsEnabled(data.animationsEnabled);
+        if (typeof data.autoPrep === 'boolean') setAutoPrep(data.autoPrep);
         if (Array.isArray(data.enabledServiceModes)) {
           const normalizedModes = data.enabledServiceModes
             .map((mode: unknown) => String(mode || '').trim().toLowerCase())
@@ -365,6 +374,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
       printSize,
       printScale: FIXED_PRINT_SCALE,
       panelColor,
+      autoPrep,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
@@ -398,6 +408,7 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     printSize,
     printScale,
     panelColor,
+    autoPrep,
   ]);
 
   const touchResetDate = (date?: Date) => {
@@ -500,6 +511,8 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         setPanelColor,
         animationsEnabled,
         setAnimationsEnabled,
+        autoPrep,
+        setAutoPrep,
         computeNextNumber,
         touchResetDate,
       }}
