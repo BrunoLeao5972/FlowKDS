@@ -1,7 +1,7 @@
 import { useOrders } from '@/contexts/OrderContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSettings, ServiceMode } from '@/contexts/SettingsContext';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell } from 'lucide-react';
 import { getDisplayCustomerName, getPanelCustomerName } from '@/lib/customerName';
@@ -101,6 +101,7 @@ function PublicDisplayContent() {
   const [, setTick] = useState(0);
   const [secretBuffer, setSecretBuffer] = useState('');
   const [showModeFeedback, setShowModeFeedback] = useState(false);
+  const prevReadyIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const interval = setInterval(() => setTick(t => t + 1), 3000);
@@ -135,8 +136,7 @@ function PublicDisplayContent() {
     return () => window.clearTimeout(timeout);
   }, [showModeFeedback]);
 
-  const normalizedPanelModes = useMemo(() => {
-    const configured = (settings.panelEnabledServiceModes || [])
+  const normalizedPanelModes = useMemo(() => {    const configured = (settings.panelEnabledServiceModes || [])
       .map(mode => normalizeServiceMode(mode))
       .filter((mode): mode is ServiceMode => !!mode);
 
@@ -157,6 +157,23 @@ function PublicDisplayContent() {
   const readyOrders = orders
     .filter(o => o.status === 'ready' && isDisplayMode(o.serviceMode) && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => (b.readyAt?.getTime() || 0) - (a.readyAt?.getTime() || 0));
+
+  // Toca o som de chamada no painel sempre que um novo pedido ficar pronto.
+  useEffect(() => {
+    const currentIds = new Set(readyOrders.map(o => o.id));
+    const prev = prevReadyIdsRef.current;
+    const hasNew = readyOrders.some(o => !prev.has(o.id));
+    prevReadyIdsRef.current = currentIds;
+
+    if (hasNew && settings.panelCallSoundEnabled && settings.panelCallSound) {
+      try {
+        new Audio(settings.panelCallSound).play().catch(() => {});
+      } catch {
+        // ignore autoplay restrictions
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyOrders.map(o => o.id).join(','), settings.panelCallSoundEnabled, settings.panelCallSound]);
 
   return (
     <div className="h-screen overflow-hidden flex flex-col p-6 pb-10 md:p-10 md:pb-10 tema-background">

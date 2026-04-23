@@ -30,6 +30,8 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || true;
 const AUTH_ENABLED = process.env.AUTH_ENABLED === 'true';
 const AUTH_USERNAME = process.env.AUTH_USERNAME || '';
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || '';
+const AUTH_PASSWORD_HASH = process.env.AUTH_PASSWORD_HASH || '';
+const AUTH_PASSWORD_SALT = process.env.AUTH_PASSWORD_SALT || '';
 const AUTH_RESET_CODE = process.env.AUTH_RESET_CODE || '';
 const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || `${AUTH_PASSWORD || 'kds'}-token-secret`;
 const AUTH_TOKEN_TTL_HOURS = Number(process.env.AUTH_TOKEN_TTL_HOURS || 12);
@@ -125,18 +127,24 @@ function createPasswordDigest(password) {
 
 function isValidPassword(password, salt, passwordHash) {
   const actual = hashPassword(password, salt);
-  return crypto.timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(passwordHash, 'hex'));
+  const actualBuf = Buffer.from(actual, 'hex');
+  const expectedBuf = Buffer.from(passwordHash, 'hex');
+  if (actualBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(actualBuf, expectedBuf);
 }
 
 async function getActiveAuthConfig() {
   const stored = await AuthConfig.findOne({ key: 'default' }).lean();
   if (stored) return stored;
 
-  if (!AUTH_USERNAME || !AUTH_PASSWORD) return null;
+  const hasLegacyPassword = !!AUTH_PASSWORD;
+  const hasEnvPasswordDigest = !!AUTH_PASSWORD_HASH && !!AUTH_PASSWORD_SALT;
+  if (!AUTH_USERNAME || (!hasLegacyPassword && !hasEnvPasswordDigest)) return null;
+
   return {
     username: AUTH_USERNAME,
-    passwordHash: null,
-    passwordSalt: null,
+    passwordHash: hasEnvPasswordDigest ? AUTH_PASSWORD_HASH : null,
+    passwordSalt: hasEnvPasswordDigest ? AUTH_PASSWORD_SALT : null,
   };
 }
 
@@ -170,7 +178,7 @@ async function isAuthorizedHeader(headerValue, token) {
       return parsed.password === AUTH_PASSWORD;
     }
     return isValidPassword(parsed.password, activeAuth.passwordSalt, activeAuth.passwordHash)
-      || parsed.password === AUTH_PASSWORD;
+      || (AUTH_PASSWORD ? parsed.password === AUTH_PASSWORD : false);
   }
 
   const dbUser = await User.findOne({ tenantId: LEGACY_TENANT_ID, username: parsed.username.toLowerCase() });
@@ -338,18 +346,24 @@ function getLocalIp() {
 }
 
 function toISO(o) {
+  const toIsoOrUndefined = (value) => {
+    if (value === undefined || value === null || value === '') return undefined;
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  };
+
   return {
     ...o,
-    createdAt: new Date(o.createdAt).toISOString(),
-    updatedAt: new Date(o.updatedAt).toISOString(),
-    acceptedAt: o.acceptedAt ? new Date(o.acceptedAt).toISOString() : undefined,
-    startedAt: o.startedAt ? new Date(o.startedAt).toISOString() : undefined,
-    finishedAt: o.finishedAt ? new Date(o.finishedAt).toISOString() : undefined,
-    prepareStartedAt: o.prepareStartedAt ? new Date(o.prepareStartedAt).toISOString() : undefined,
-    readyAt: o.readyAt ? new Date(o.readyAt).toISOString() : undefined,
-    deliveredAt: o.deliveredAt ? new Date(o.deliveredAt).toISOString() : undefined,
-    cancelledAt: o.cancelledAt ? new Date(o.cancelledAt).toISOString() : undefined,
-    cancelAcknowledgedAt: o.cancelAcknowledgedAt ? new Date(o.cancelAcknowledgedAt).toISOString() : undefined,
+    createdAt: toIsoOrUndefined(o.createdAt) || new Date().toISOString(),
+    updatedAt: toIsoOrUndefined(o.updatedAt) || new Date().toISOString(),
+    acceptedAt: toIsoOrUndefined(o.acceptedAt),
+    startedAt: toIsoOrUndefined(o.startedAt),
+    finishedAt: toIsoOrUndefined(o.finishedAt),
+    prepareStartedAt: toIsoOrUndefined(o.prepareStartedAt),
+    readyAt: toIsoOrUndefined(o.readyAt),
+    deliveredAt: toIsoOrUndefined(o.deliveredAt),
+    cancelledAt: toIsoOrUndefined(o.cancelledAt),
+    cancelAcknowledgedAt: toIsoOrUndefined(o.cancelAcknowledgedAt),
   };
 }
 
@@ -360,6 +374,23 @@ function parseTimestamp(raw) {
   const asDate = Date.parse(String(raw));
   if (!Number.isNaN(asDate)) return asDate;
   return undefined;
+}
+
+function resolveTicketOrderNumber({ orderNumber, serviceMode, lancamentoId }) {
+  const mode = String(serviceMode || '').trim().toLowerCase();
+  const numericOrderNumber = Number(orderNumber || 0);
+
+  if (mode === 'delivery' || mode === 'encomenda') {
+    const digits = String(lancamentoId || '').replace(/\D/g, '');
+    if (digits.length >= 3) {
+      const pickupNumber = Number(digits.slice(-3));
+      if (Number.isFinite(pickupNumber) && pickupNumber > 0) {
+        return pickupNumber;
+      }
+    }
+  }
+
+  return numericOrderNumber;
 }
 
 function normalizeStoredOrderItem(it) {
@@ -669,6 +700,8 @@ function normalizeRestaurantPayload(payload) {
     readyOrderSound: raw.readyOrderSound === null ? DEFAULT_READY_ORDER_SOUND : (raw.readyOrderSound ? String(raw.readyOrderSound) : DEFAULT_READY_ORDER_SOUND),
     newOrderSoundEnabled: toSafeBoolean(raw.newOrderSoundEnabled, true),
     readyOrderSoundEnabled: toSafeBoolean(raw.readyOrderSoundEnabled, true),
+    panelCallSound: raw.panelCallSound === null ? DEFAULT_READY_ORDER_SOUND : (raw.panelCallSound ? String(raw.panelCallSound) : DEFAULT_READY_ORDER_SOUND),
+    panelCallSoundEnabled: toSafeBoolean(raw.panelCallSoundEnabled, true),
     printerName: toSafeString(raw.printerName),
     printSize,
     printScale: toSafeNumber(raw.printScale, 115),
@@ -778,7 +811,7 @@ app.post('/auth/login', asyncHandler(async (req, res) => {
     const validPassword = (activeAuth.passwordHash && activeAuth.passwordSalt
       ? isValidPassword(password, activeAuth.passwordSalt, activeAuth.passwordHash)
       : false)
-      || password === AUTH_PASSWORD;
+      || (AUTH_PASSWORD ? password === AUTH_PASSWORD : false);
 
     if (!validPassword) {
       return res.status(401).json({ error: 'invalid_credentials' });
@@ -944,6 +977,8 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
       readyOrderSound: DEFAULT_READY_ORDER_SOUND,
       newOrderSoundEnabled: true,
       readyOrderSoundEnabled: true,
+      panelCallSound: DEFAULT_READY_ORDER_SOUND,
+      panelCallSoundEnabled: true,
       printerName: '',
       printSize: '80mm',
       printScale: 115,
@@ -977,6 +1012,8 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     readyOrderSound: existing.readyOrderSound || DEFAULT_READY_ORDER_SOUND,
     newOrderSoundEnabled: existing.newOrderSoundEnabled ?? true,
     readyOrderSoundEnabled: existing.readyOrderSoundEnabled ?? true,
+    panelCallSound: existing.panelCallSound || DEFAULT_READY_ORDER_SOUND,
+    panelCallSoundEnabled: existing.panelCallSoundEnabled ?? true,
     printerName: existing.printerName || '',
     printSize: existing.printSize || '80mm',
     printScale: existing.printScale ?? 115,
@@ -1037,6 +1074,8 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     readyOrderSound: saved.readyOrderSound || DEFAULT_READY_ORDER_SOUND,
     newOrderSoundEnabled: saved.newOrderSoundEnabled ?? true,
     readyOrderSoundEnabled: saved.readyOrderSoundEnabled ?? true,
+    panelCallSound: saved.panelCallSound || DEFAULT_READY_ORDER_SOUND,
+    panelCallSoundEnabled: saved.panelCallSoundEnabled ?? true,
     printerName: saved.printerName || '',
     printSize: saved.printSize || '80mm',
     printScale: saved.printScale ?? 115,
@@ -1053,20 +1092,27 @@ app.post('/print/ticket', authMiddleware, asyncHandler(async (req, res) => {
   const body = req.body || {};
   const mode = String(body.mode || 'HTML').toUpperCase();
   const orderNumber = Number(body.orderNumber || 0);
+  const serviceMode = String(body.serviceMode || '').trim().toLowerCase() || null;
+  const lancamentoId = String(body.lancamentoId ?? body.lancamentoid ?? '').trim() || null;
+  const effectiveOrderNumber = resolveTicketOrderNumber({
+    orderNumber,
+    serviceMode,
+    lancamentoId,
+  });
   const printerName = String(body.printerName || '').trim();
 
   if (!['FILE', 'HTML', 'IMPRESSORA'].includes(mode)) {
     return res.status(400).json({ error: 'invalid_mode' });
   }
 
-  if (!Number.isFinite(orderNumber) || orderNumber <= 0) {
+  if (!Number.isFinite(effectiveOrderNumber) || effectiveOrderNumber <= 0) {
     return res.status(400).json({ error: 'invalid_order_number' });
   }
 
-  const result = await printPedido(orderNumber, printerName, mode, {
+  const result = await printPedido(effectiveOrderNumber, printerName, mode, {
     outputDir: PRINT_PEDIDO_OUTPUT_DIR || undefined,
     customerName: String(body.customerName || ''),
-    serviceMode: String(body.serviceMode || '').trim().toLowerCase() || null,
+    serviceMode,
     attendant: String(body.attendant || '').trim(),
     sellerName: String(body.sellerName || '').trim(),
     tradeName: String(body.tradeName || ''),
@@ -1715,6 +1761,7 @@ if (fs.existsSync(DIST)) {
 app.post('/orders', asyncHandler(async (req, res) => {
   const { number, customerName, items, observations, cookId, suppressAutoPrint, sellerName } = req.body;
   const attendant = String(req.body?.attendant || req.body?.waiter || req.body?.garcom || req.body?.atendente || '').trim() || null;
+  const lancamentoId = String(req.body?.lancamentoId ?? req.body?.lancamentoid ?? req.body?.launchId ?? '').trim() || null;
   const integratorId = String(req.body?.integratorId || '').trim() || null;
   const integratorName = String(req.body?.integratorName || '').trim() || null;
   const sourceUpdatedAt = parseTimestamp(req.body?.sourceUpdatedAt ?? req.body?.updatedAt);
@@ -1786,6 +1833,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
         const metadataPatch = {
           number,
           customerName: customerName || '',
+          lancamentoId,
           serviceMode,
           attendant,
           integratorId,
@@ -1862,6 +1910,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
     tenantId: LEGACY_TENANT_ID,
     id,
     externalId,
+    lancamentoId,
     demandId: demandId || null,
     number,
     customerName: customerName || '',
@@ -1897,7 +1946,12 @@ app.post('/orders', asyncHandler(async (req, res) => {
   const isMesaOrCartaoOrder = serviceMode === 'mesa' || serviceMode === 'cartao';
 
   if (PRINT_PEDIDO_AUTO_ENABLED && !suppressAutoPrint && !isMesaOrCartaoOrder) {
-    console.log(`[print-pedido] AUTO_ENABLED ativada - tentando imprimir pedido #${order.number}`);
+    const printOrderNumber = resolveTicketOrderNumber({
+      orderNumber: order.number,
+      serviceMode: order.serviceMode,
+      lancamentoId: order.lancamentoId,
+    });
+    console.log(`[print-pedido] AUTO_ENABLED ativada - tentando imprimir pedido #${printOrderNumber}`);
     setImmediate(async () => {
       try {
         console.log(`[print-pedido] Buscando configurações do restaurante...`);
@@ -1908,7 +1962,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
         console.log(`[print-pedido] Settings encontradas: tradeName="${tradeName}", printSize="${printSize}", printScale=${printScale}`);
 
         const printResult = await printPedido(
-          order.number,
+          printOrderNumber,
           PRINT_PEDIDO_IMPRESSORA,
           PRINT_PEDIDO_MODO,
           {
@@ -1933,7 +1987,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
         }
 
         console.log(
-          `[print-pedido] Pedido ${order.number} impresso em modo ${PRINT_PEDIDO_MODO}`
+          `[print-pedido] Pedido ${printOrderNumber} impresso em modo ${PRINT_PEDIDO_MODO}`
           + (printResult.arquivoGerado ? ` | arquivo: ${printResult.arquivoGerado}` : '')
         );
       } catch (err) {

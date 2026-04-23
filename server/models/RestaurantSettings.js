@@ -23,6 +23,8 @@ const restaurantSettingsSchema = new mongoose.Schema(
     readyOrderSound: { type: String, default: '/Songs/Efeito Sonoro - Pedido Pronto.mp3' },
     newOrderSoundEnabled: { type: Boolean, default: true },
     readyOrderSoundEnabled: { type: Boolean, default: true },
+    panelCallSound: { type: String, default: '/Songs/Efeito Sonoro - Pedido Pronto.mp3' },
+    panelCallSoundEnabled: { type: Boolean, default: true },
     printerName: { type: String, default: '' },
     printSize: { type: String, default: '80mm' },
     printScale: { type: Number, default: 115 },

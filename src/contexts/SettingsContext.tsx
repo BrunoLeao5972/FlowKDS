@@ -25,6 +25,9 @@ type Settings = {
   readyOrderSound: string | null;
   newOrderSoundEnabled: boolean;
   readyOrderSoundEnabled: boolean;
+  // panel call sound (plays on /display when an order becomes ready)
+  panelCallSound: string | null;
+  panelCallSoundEnabled: boolean;
   printerName: string;
   printSize: PrintSize;
   printScale: number;
@@ -51,6 +54,8 @@ type Settings = {
   setReadyOrderSound: (s: string | null) => void;
   setNewOrderSoundEnabled: (b: boolean) => void;
   setReadyOrderSoundEnabled: (b: boolean) => void;
+  setPanelCallSound: (s: string | null) => void;
+  setPanelCallSoundEnabled: (b: boolean) => void;
   setPrinterName: (name: string) => void;
   setPrintSize: (size: PrintSize) => void;
   setPrintScale: (scale: number) => void;
@@ -105,6 +110,8 @@ const defaultValues: Settings = {
   readyOrderSound: DEFAULT_READY_ORDER_SOUND,
   newOrderSoundEnabled: true,
   readyOrderSoundEnabled: true,
+  panelCallSound: DEFAULT_READY_ORDER_SOUND,
+  panelCallSoundEnabled: true,
   printerName: '',
   printSize: '80mm',
   printScale: FIXED_PRINT_SCALE,
@@ -130,6 +137,8 @@ const defaultValues: Settings = {
   setReadyOrderSound: () => {},
   setNewOrderSoundEnabled: () => {},
   setReadyOrderSoundEnabled: () => {},
+  setPanelCallSound: () => {},
+  setPanelCallSoundEnabled: () => {},
   setPrinterName: () => {},
   setPrintSize: () => {},
   setPrintScale: () => {},
@@ -178,6 +187,8 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const [readyOrderSound, setReadyOrderSound] = useState<string | null>(defaultValues.readyOrderSound);
   const [newOrderSoundEnabled, setNewOrderSoundEnabled] = useState<boolean>(defaultValues.newOrderSoundEnabled);
   const [readyOrderSoundEnabled, setReadyOrderSoundEnabled] = useState<boolean>(defaultValues.readyOrderSoundEnabled);
+  const [panelCallSound, setPanelCallSound] = useState<string | null>(defaultValues.panelCallSound);
+  const [panelCallSoundEnabled, setPanelCallSoundEnabled] = useState<boolean>(defaultValues.panelCallSoundEnabled);
   const [printerName, setPrinterName] = useState<string>(defaultValues.printerName);
   const [printSize, setPrintSize] = useState<PrintSize>(defaultValues.printSize);
   const [printScale, setPrintScale] = useState<number>(defaultValues.printScale);
@@ -240,6 +251,10 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         }
         if (typeof parsed.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(parsed.newOrderSoundEnabled);
         if (typeof parsed.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(parsed.readyOrderSoundEnabled);
+        if (Object.prototype.hasOwnProperty.call(parsed, 'panelCallSound')) {
+          setPanelCallSound(normalizeSoundSource(parsed.panelCallSound, DEFAULT_READY_ORDER_SOUND));
+        }
+        if (typeof parsed.panelCallSoundEnabled === 'boolean') setPanelCallSoundEnabled(parsed.panelCallSoundEnabled);
         if (typeof parsed.printerName === 'string') setPrinterName(parsed.printerName);
         if (parsed.printSize === '58mm' || parsed.printSize === '80mm' || parsed.printSize === 'A4') setPrintSize(parsed.printSize);
         if (typeof parsed.panelColor === 'string') setPanelColor(parsed.panelColor);
@@ -290,6 +305,10 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         }
         if (typeof data.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(data.newOrderSoundEnabled);
         if (typeof data.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(data.readyOrderSoundEnabled);
+        if (typeof data.panelCallSound === 'string' || data.panelCallSound === null) {
+          setPanelCallSound(normalizeSoundSource(data.panelCallSound, DEFAULT_READY_ORDER_SOUND));
+        }
+        if (typeof data.panelCallSoundEnabled === 'boolean') setPanelCallSoundEnabled(data.panelCallSoundEnabled);
         if (typeof data.printerName === 'string') setPrinterName(data.printerName);
         if (data.printSize === '58mm' || data.printSize === '80mm' || data.printSize === 'A4') setPrintSize(data.printSize);
         if (typeof data.printScale === 'number' && Number.isFinite(data.printScale)) setPrintScale(data.printScale);
@@ -340,6 +359,8 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
       readyOrderSound,
       newOrderSoundEnabled,
       readyOrderSoundEnabled,
+      panelCallSound,
+      panelCallSoundEnabled,
       printerName,
       printSize,
       printScale: FIXED_PRINT_SCALE,
@@ -371,6 +392,8 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
     readyOrderSound,
     newOrderSoundEnabled,
     readyOrderSoundEnabled,
+    panelCallSound,
+    panelCallSoundEnabled,
     printerName,
     printSize,
     printScale,
@@ -387,6 +410,8 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   const _setReadyOrderSound = (s: string | null) => setReadyOrderSound(s);
   const _setNewOrderSoundEnabled = (b: boolean) => setNewOrderSoundEnabled(b);
   const _setReadyOrderSoundEnabled = (b: boolean) => setReadyOrderSoundEnabled(b);
+  const _setPanelCallSound = (s: string | null) => setPanelCallSound(s);
+  const _setPanelCallSoundEnabled = (b: boolean) => setPanelCallSoundEnabled(b);
 
   const computeNextNumber = (orders: Array<{ number: number; createdAt?: string | number | Date }>) => {
     // Define base inicial conforme modo configurado.
@@ -442,6 +467,10 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
         setReadyOrderSound: _setReadyOrderSound,
         setNewOrderSoundEnabled: _setNewOrderSoundEnabled,
         setReadyOrderSoundEnabled: _setReadyOrderSoundEnabled,
+        panelCallSound,
+        panelCallSoundEnabled,
+        setPanelCallSound: _setPanelCallSound,
+        setPanelCallSoundEnabled: _setPanelCallSoundEnabled,
         setPrinterName,
         setPrintSize,
         setPrintScale: () => setPrintScale(FIXED_PRINT_SCALE),

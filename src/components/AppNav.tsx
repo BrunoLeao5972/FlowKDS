@@ -53,6 +53,8 @@ export function AppNav() {
     setReadyOrderSound,
     setNewOrderSoundEnabled,
     setReadyOrderSoundEnabled,
+    setPanelCallSound,
+    setPanelCallSoundEnabled,
     setPrinterName,
     setPrintSize,
     setPrintScale,
@@ -92,6 +94,8 @@ export function AppNav() {
     readyOrderSound: string | null;
     newOrderSoundEnabled: boolean;
     readyOrderSoundEnabled: boolean;
+    panelCallSound: string | null;
+    panelCallSoundEnabled: boolean;
     printerName: string;
     printSize: '58mm' | '80mm' | 'A4';
     printScale: number;
@@ -203,7 +207,9 @@ export function AppNav() {
             printScale,
             serviceModes,
             panelServiceModes,
-            panelColorParam
+            panelColorParam,
+            panelCallSound,
+            panelCallEnabled
           ) => {
             setTempoMedio(medio);
             setTempoCritico(critico);
@@ -241,6 +247,8 @@ export function AppNav() {
               readyOrderSound,
               newOrderSoundEnabled: !!newOrderEnabled,
               readyOrderSoundEnabled: !!readyEnabled,
+              panelCallSound,
+              panelCallSoundEnabled: !!panelCallEnabled,
               printerName,
               printSize,
               printScale,
@@ -256,6 +264,8 @@ export function AppNav() {
             setReadyOrderSound(readyOrderSound);
             setNewOrderSoundEnabled(!!newOrderEnabled);
             setReadyOrderSoundEnabled(!!readyEnabled);
+            setPanelCallSound(panelCallSound);
+            setPanelCallSoundEnabled(!!panelCallEnabled);
             setPrinterName(printerName);
             setPrintSize(printSize);
             setPrintScale(115);

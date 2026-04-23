@@ -201,6 +201,21 @@ function parseLaunchCodeFromRow(row) {
   return '';
 }
 
+function parseLancamentoIdFromRow(row) {
+  const candidates = [
+    row.lancamentoid,
+    row.launchid,
+    row.lancamento,
+  ];
+
+  for (const value of candidates) {
+    const normalized = String(value || '').trim();
+    if (normalized) return normalized;
+  }
+
+  return null;
+}
+
 function buildDemandId(externalId, updatedAt) {
   const ext = String(externalId || '').trim();
   if (!ext || !updatedAt) return null;
@@ -384,6 +399,7 @@ function groupRowsToOrders(rows) {
       grouped.set(launchCode, {
         externalId: launchCode,
         sourceExternalId: launchCode,
+        lancamentoId: parseLancamentoIdFromRow(row),
         number: row.number,
         customerName: row.customername,
         serviceMode: parseServiceModeFromRow(row),
@@ -404,6 +420,9 @@ function groupRowsToOrders(rows) {
     const current = grouped.get(launchCode);
     if (!current.serviceMode) {
       current.serviceMode = parseServiceModeFromRow(row);
+    }
+    if (!current.lancamentoId) {
+      current.lancamentoId = parseLancamentoIdFromRow(row);
     }
     if (!current.attendant) {
       current.attendant = parseAttendantFromRow(row);
@@ -679,6 +698,7 @@ async function createOrderInKds(row, options = {}) {
   const payload = {
     number: Number(row.number),
     externalid: externalIdStr || undefined,
+    lancamentoId: String(row.lancamentoId || '').trim() || undefined,
     demandId: demandId || undefined,
     customerName: normalizeCustomerName(row.customername),
     serviceMode: serviceMode,
@@ -849,6 +869,7 @@ async function syncCycle(pool, state, queryText, options = {}) {
   let updated = 0;
   let skipped = 0;
   let maxSyncDate = new Date(state.lastSyncAt);
+  const keepDeliveredOrderModes = new Set(['mesa', 'cartao', 'apartamento']);
 
   for (const row of orders) {
     const externalId = String(row.externalId || '').trim();
@@ -866,6 +887,8 @@ async function syncCycle(pool, state, queryText, options = {}) {
     }
 
     const mappedStatus = normalizeStatus(row.status);
+    const mode = String(row.serviceMode || '').trim().toLowerCase();
+    const shouldAllowDeliveredUnseen = mappedStatus === 'delivered' && keepDeliveredOrderModes.has(mode);
     const currentItems = Array.isArray(row.items) ? row.items : [];
     const previousItemsSnapshot = state.lastItemsSnapshotByExternalId?.[externalId] || {};
     const deltaItems = getDeltaItems(currentItems, previousItemsSnapshot);
@@ -880,34 +903,42 @@ async function syncCycle(pool, state, queryText, options = {}) {
       continue;
     }
 
-    // Se todos os itens já foram entregues (status=delivered) e o pedido nunca entrou no KDS,
-    // não criar — evita poluir a cozinha com comandas já finalizadas.
+    // Se o pedido já veio como entregue e ainda não existe no KDS, por padrão não cria para evitar poluição.
+    // Exceção: mesa/cartão/apartamento podem chegar da origem já com flag "entregue" no lançamento,
+    // mas ainda precisam aparecer no KDS (caso real: mesa 02 com pedidos 114898/114899).
     if (mappedStatus === 'delivered' && !kdsId) {
-      console.log(`[sql2014-bridge] lançamento já entregue ignorado (nunca foi para KDS): externalId=${externalId}`);
-      // Avança o cursor mesmo assim para não reprocessar
-      state.lastStatusByExternalId[syncKey] = 'delivered';
+      if (!keepDeliveredOrderModes.has(mode)) {
+        console.log(`[sql2014-bridge] lançamento já entregue ignorado (nunca foi para KDS): externalId=${externalId} mode=${mode || 'desconhecido'}`);
+        // Avança o cursor mesmo assim para não reprocessar
+        state.lastStatusByExternalId[syncKey] = 'delivered';
+        state.lastItemsSnapshotByExternalId[externalId] = buildItemsSnapshot(currentItems);
+        skipped += 1;
+        continue;
+      }
+
+      console.log(`[sql2014-bridge] lançamento entregue aceito para modo ${mode}: externalId=${externalId}`);
+    }
+
+    // Para demanda nova da mesma comanda, cria card apenas quando houver item novo.
+    if (!kdsId && deltaItems.length === 0 && !shouldAllowDeliveredUnseen) {
       state.lastItemsSnapshotByExternalId[externalId] = buildItemsSnapshot(currentItems);
       skipped += 1;
       continue;
     }
 
-    // Para demanda nova da mesma comanda, cria card apenas quando houver item novo.
-    if (!kdsId && deltaItems.length === 0) {
-      state.lastItemsSnapshotByExternalId[externalId] = buildItemsSnapshot(currentItems);
-      skipped += 1;
-      continue;
-    }
+    const itemsToSend = kdsId ? currentItems : (deltaItems.length > 0 ? deltaItems : currentItems);
 
     try {
       const syncedOrder = await createOrderInKds({
         number: row.number,
         customername: row.customerName,
+        lancamentoId: row.lancamentoId,
         serviceMode: row.serviceMode,
         attendant: row.attendant,
         integrator: row.integrator,
         sellerName: row.sellerName,
         observations: row.observations,
-        itemsjson: kdsId ? currentItems : deltaItems,
+        itemsjson: itemsToSend,
         externalid: externalId,
         demandId,
         updatedAt: updatedAt.toISOString(),

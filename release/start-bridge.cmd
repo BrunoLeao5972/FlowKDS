@@ -7,14 +7,10 @@ if not exist ".env" (
   echo Revise credenciais e configuracoes quando necessario.
 )
 
-if exist "..\server\scripts\sql2014-kds-bridge.js" (
-  node "..\server\scripts\sql2014-kds-bridge.js"
-) else (
-  kds-bridge.exe
-)
+kds-bridge.exe
 if errorlevel 1 (
   echo.
-  echo [ERRO] Bridge encerrou com erro.
+  echo [ERRO] kds-bridge.exe encerrou com erro.
   pause
   exit /b 1
 )

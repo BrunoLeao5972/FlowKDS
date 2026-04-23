@@ -83,6 +83,21 @@ const dedupeOrders = (orders: Order[]) => {
   return sortOrdersByCreatedAt([...byIdentity.values()]);
 };
 
+const getTicketDisplayNumber = (order: Pick<Order, 'number' | 'serviceMode' | 'lancamentoId'>): number => {
+  const mode = normalizeServiceMode(order.serviceMode);
+  if (mode === 'delivery' || mode === 'encomenda') {
+    const digits = String(order.lancamentoId || '').replace(/\D/g, '');
+    if (digits.length >= 3) {
+      const pickupNumber = Number(digits.slice(-3));
+      if (Number.isFinite(pickupNumber) && pickupNumber > 0) {
+        return pickupNumber;
+      }
+    }
+  }
+
+  return Number(order.number || 0);
+};
+
 const replaceOrderByIdentity = (orders: Order[], nextOrder: Order) => {
   const key = getOrderIdentityKey(nextOrder);
   return sortOrdersByCreatedAt([
@@ -91,10 +106,10 @@ const replaceOrderByIdentity = (orders: Order[], nextOrder: Order) => {
   ]);
 };
 
-// Pedidos de mesa e cartão não geram ticket automático de balcão/cozinha.
+// Pedidos de mesa, cartão e apartamento não geram ticket automático de balcão/cozinha.
 const shouldAutoPrintTicket = (order: Pick<Order, 'serviceMode'>): boolean => {
   const mode = normalizeServiceMode(order.serviceMode);
-  return mode !== 'mesa' && mode !== 'cartao';
+  return mode !== 'mesa' && mode !== 'cartao' && mode !== 'apartamento';
 };
 
 export function OrderProvider({ children }: { children: React.ReactNode }) {
@@ -171,6 +186,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   const buildTicketHtml = useCallback((order: Order, resolvedPrinterName: string) => {
     const createdAt = new Date(order.createdAt);
     const dateText = createdAt.toLocaleString('pt-BR');
+    const displayNumber = getTicketDisplayNumber(order);
     const printableIdentity = getPrintableTicketIdentity({
       customerName: order.customerName,
       serviceMode: order.serviceMode,
@@ -183,7 +199,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <title>Senha ${order.number}</title>
+    <title>Senha ${displayNumber}</title>
     <style>
       body { font-family: Arial, sans-serif; margin: 0; padding: 16px; }
       .ticket { width: ${ticketWidth}px; border: 1px dashed #999; padding: 12px; }
@@ -206,7 +222,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     <div class="ticket">
       ${tradeName ? `<div class="trade-name">${tradeName}</div>` : ''}
       <div class="title">SENHA DO PEDIDO</div>
-      <div class="senha">${order.number}</div>
+      <div class="senha">${displayNumber}</div>
       <div class="line"><strong>${printableIdentity.label}:</strong> ${printableIdentity.name}</div>
       <div class="line"><strong>Data/Hora:</strong> ${dateText}</div>
       <div class="items">
@@ -244,6 +260,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             printSize: settings.printSize,
             printScale: settings.printScale,
             orderNumber: createdOrder.number,
+            lancamentoId: (createdOrder as any).lancamentoId || null,
             customerName: createdOrder.customerName,
             serviceMode: createdOrder.serviceMode,
             attendant: createdOrder.attendant,
@@ -268,6 +285,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           printSize: settings.printSize,
           printScale: settings.printScale,
           orderNumber: createdOrder.number,
+          lancamentoId: (createdOrder as any).lancamentoId || null,
           customerName: createdOrder.customerName,
           serviceMode: createdOrder.serviceMode,
           attendant: createdOrder.attendant,
@@ -321,6 +339,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           printSize: settings.printSize,
           printScale: settings.printScale,
           orderNumber: orderToPrint.number,
+          lancamentoId: (orderToPrint as any).lancamentoId || null,
           customerName: orderToPrint.customerName,
           serviceMode: orderToPrint.serviceMode,
           attendant: orderToPrint.attendant,

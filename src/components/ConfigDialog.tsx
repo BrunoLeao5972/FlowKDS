@@ -55,7 +55,9 @@ interface ConfigDialogProps {
     printScale: number,
     serviceModes: ServiceMode[],
     panelServiceModes: ServiceMode[],
-    panelColor: string
+    panelColor: string,
+    panelCallSound: string | null,
+    panelCallEnabled: boolean
   ) => void;
   ThemeToggle: React.ReactNode;
   orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
@@ -111,6 +113,10 @@ const BUILTIN_SONG_OPTIONS = [
   {
     value: '/Songs/Efeito Sonoro - Pedido Pronto.mp3',
     label: 'Efeito Sonoro - Pedido Pronto',
+  },
+  {
+    value: '/Songs/Efeito Sonoro - Painel de Retirada.mp3',
+    label: 'Efeito Sonoro - Painel de Retirada',
   },
 ] as const;
 
@@ -251,12 +257,16 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [readyOrderSoundData, setReadyOrderSoundDataLocal] = useState<string | null>(settings.readyOrderSound || null);
   const [newOrderEnabled, setNewOrderEnabledLocal] = useState<boolean>(settings.newOrderSoundEnabled ?? true);
   const [readyEnabled, setReadyEnabledLocal] = useState<boolean>(settings.readyOrderSoundEnabled ?? true);
+  const [panelCallSoundData, setPanelCallSoundDataLocal] = useState<string | null>(settings.panelCallSound || null);
+  const [panelCallEnabled, setPanelCallEnabledLocal] = useState<boolean>(settings.panelCallSoundEnabled ?? true);
 
   // Wrappers que persistem imediatamente no SettingsContext (sem precisar clicar em Salvar)
   const setNewOrderSoundData = (v: string | null) => { setNewOrderSoundDataLocal(v); settings.setNewOrderSound(v); };
   const setReadyOrderSoundData = (v: string | null) => { setReadyOrderSoundDataLocal(v); settings.setReadyOrderSound(v); };
   const setNewOrderEnabled = (v: boolean) => { setNewOrderEnabledLocal(v); settings.setNewOrderSoundEnabled(v); };
   const setReadyEnabled = (v: boolean) => { setReadyEnabledLocal(v); settings.setReadyOrderSoundEnabled(v); };
+  const setPanelCallSoundData = (v: string | null) => { setPanelCallSoundDataLocal(v); settings.setPanelCallSound(v); };
+  const setPanelCallEnabled = (v: boolean) => { setPanelCallEnabledLocal(v); settings.setPanelCallSoundEnabled(v); };
   const [printerName, setPrinterName] = useState(settings.printerName || '');
   const [printSize, setPrintSize] = useState<'58mm' | '80mm' | 'A4'>(settings.printSize || '80mm');
   const [selectedServiceModes, setSelectedServiceModes] = useState<ServiceMode[]>(
@@ -752,6 +762,15 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     } catch (e) {}
   };
 
+  /** Carrega o arquivo de som de chamada do painel como Data URL. */
+  const handlePanelCallFile = async (f?: File) => {
+    if (!f) return;
+    try {
+      const data = await readFileAsDataUrl(f);
+      setPanelCallSoundData(data);
+    } catch (e) {}
+  };
+
   /** Toca uma prévia do som a partir de uma Data URL ou caminho absoluto. */
   const play = (src: string | null) => {
     if (!src) return;
@@ -1180,7 +1199,9 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       115,
       selectedServiceModes,
       selectedPanelServiceModes,
-      panelColorLocal
+      panelColorLocal,
+      panelCallSoundData,
+      panelCallEnabled
     );
   };
 
@@ -1231,7 +1252,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     { id: 'permissions', label: '🔐 Permissões', panel: 'permissions' },
     { id: 'modes', label: '📦 Modalidades', panel: 'modes' },
     ...(canViewReports ? [{ id: 'reports', label: '📊 Relatórios', panel: 'reports' }] : []),
-    { id: 'theme', label: '🌓 Tema', panel: 'theme' },
+    { id: 'theme', label: '🌓 Sons e Temas', panel: 'theme' },
     { id: 'support', label: '❓ Suporte', panel: 'support' },
   ];
 
@@ -1247,7 +1268,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
         {/* Layout: Menu Esquerda + Conteúdo Direita */}
         <div className="flex-1 flex min-h-0">
           {/* Menu Lateral (Esquerda) */}
-          <div className="w-40 border-r border-border bg-muted/30 overflow-y-auto flex flex-col">
+          <div className="w-48 border-r border-border bg-muted/30 overflow-y-auto flex flex-col">
             <div className="p-3 space-y-2">
               {menuItems.map(item => {
                 const isActive = item.panel
@@ -2295,6 +2316,72 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
                     </div>
                   </div>
+
+                  <div className="rounded-md border border-border bg-background p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">Som: Chamada no Painel</p>
+                          <p className="text-xs text-muted-foreground">Dispara no painel /display quando pedido fica pronto</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPanelCallEnabled(!panelCallEnabled)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            panelCallEnabled ? 'bg-green-600' : 'bg-gray-300'
+                          }`}
+                          title={panelCallEnabled ? 'Desativar som de chamada no painel' : 'Ativar som de chamada no painel'}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                              panelCallEnabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Sons da pasta pública</label>
+                        <select
+                          className="input w-full h-9 rounded-md text-sm"
+                          value={BUILTIN_SONG_OPTIONS.some(option => option.value === panelCallSoundData) ? panelCallSoundData || '' : ''}
+                          onChange={e => setPanelCallSoundData(normalizeAudioSource(e.target.value))}
+                        >
+                          <option value="">Selecione um mp3...</option>
+                          {BUILTIN_SONG_OPTIONS.map(option => (
+                            <option key={`panel-${option.value}`} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Caminho personalizado</label>
+                        <input
+                          type="text"
+                          className="input w-full h-9 rounded-md text-sm"
+                          value={panelCallSoundData || ''}
+                          onChange={e => setPanelCallSoundData(normalizeAudioSource(e.target.value))}
+                          placeholder="/Songs/meu-chamada.mp3"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-xs font-semibold text-muted-foreground">Upload mp3:</label>
+                        <input
+                          type="file"
+                          accept="audio/mpeg,.mp3"
+                          onChange={e => void handlePanelCallFile(e.target.files?.[0])}
+                          className="text-xs"
+                        />
+                        <button
+                          type="button"
+                          className="h-8 px-3 rounded-md border border-input bg-background text-sm"
+                          onClick={() => play(panelCallSoundData)}
+                          disabled={!panelCallSoundData}
+                        >
+                          Testar
+                        </button>
+                      </div>
+                    </div>
 
                   <p className="text-xs text-muted-foreground">
                     Dica: para usar áudio fixo do sistema, coloque o arquivo em public/Songs e informe o caminho em formato /Songs/nome-do-arquivo.mp3.

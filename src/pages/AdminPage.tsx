@@ -106,6 +106,18 @@ function getOrderReferenceDate(order: Order): Date {
   return order.createdAt;
 }
 
+function getPickupDisplayNumber(order: Order): string {
+  const isDeliveryOrEncomenda = order.serviceMode === 'delivery' || order.serviceMode === 'encomenda';
+  if (isDeliveryOrEncomenda) {
+    const digits = String(order.lancamentoId || '').replace(/\D/g, '');
+    if (digits.length >= 3) {
+      return digits.slice(-3);
+    }
+  }
+
+  return String(order.number);
+}
+
 function toDateInputValue(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -355,6 +367,7 @@ export default function AdminPage() {
                 const Icon = cfg.icon;
                 const modeConfig = getServiceModeConfig(order.serviceMode);
                 const ServiceModeIcon = modeConfig?.icon;
+                const displayNumber = getPickupDisplayNumber(order);
                 return (
                   <motion.div
                     key={order.id}
@@ -366,7 +379,7 @@ export default function AdminPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-lg">{order.number}</span>
+                          <span className="font-bold text-lg">{displayNumber}</span>
                           {ServiceModeIcon && (
                             <span
                               className={`inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border ${modeConfig?.colorClass}`}
@@ -489,6 +502,7 @@ export default function AdminPage() {
                     const Icon = cfg.icon;
                     const modeConfig = getServiceModeConfig(order.serviceMode);
                     const ServiceModeIcon = modeConfig?.icon;
+                    const displayNumber = getPickupDisplayNumber(order);
                     return (
                       <motion.tr
                         key={order.id}
@@ -499,7 +513,7 @@ export default function AdminPage() {
                       >
                         <td className="p-4">
                           <div className="flex items-center gap-2">
-                            <div className="font-bold text-lg">{order.number}</div>
+                            <div className="font-bold text-lg">{displayNumber}</div>
                             {ServiceModeIcon && (
                               <span
                                 className={`inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted border border-border ${modeConfig?.colorClass}`}

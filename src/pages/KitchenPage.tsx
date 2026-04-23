@@ -73,6 +73,34 @@ function formatItemNote(raw?: string) {
   return text;
 }
 
+function getKdsDemandHeaderNumber(order: Order): string {
+  const mode = order.serviceMode;
+  const isDeliveryOrEncomenda = mode === 'delivery' || mode === 'encomenda';
+
+  if (isDeliveryOrEncomenda) {
+    const digits = String(order.lancamentoId || '').replace(/\D/g, '');
+    if (digits.length >= 3) {
+      return digits.slice(-3);
+    }
+  }
+
+  return String(order.number);
+}
+
+function buildDemandHeaderNumbers(orders: Order[]): string {
+  const seen = new Set<string>();
+  const values: string[] = [];
+
+  for (const order of orders) {
+    const numberLabel = getKdsDemandHeaderNumber(order);
+    if (seen.has(numberLabel)) continue;
+    seen.add(numberLabel);
+    values.push(numberLabel);
+  }
+
+  return values.join(', ');
+}
+
 const RECENT_WINDOW_HOURS = 3;
 
 function isWithinLastHours(date: Date, hours: number): boolean {
@@ -394,7 +422,7 @@ export default function KitchenPage() {
             
             // Status efetivo da demanda
             const demandStatus = demand.status;
-            const demandNumbers = demand.orders.map(o => o.number).join(', ');
+            const demandNumbers = buildDemandHeaderNumbers(demand.orders);
             
             // Item statuses
             const itemStatuses = items.map(({ item, order }) => getEffectiveItemStatus(order, item));

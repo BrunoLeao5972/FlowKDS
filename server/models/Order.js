@@ -24,6 +24,7 @@ const orderSchema = new mongoose.Schema(
     tenantId: { type: String, required: true, default: 'legacy', index: true },
     id: { type: String, required: true, index: true },
     externalId: { type: String, default: null, index: true },
+    lancamentoId: { type: String, default: null, index: true },
     demandId: { type: String, default: null, index: true },
     number: { type: Number, required: true },
     customerName: { type: String, default: '' },
