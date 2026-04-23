@@ -131,48 +131,52 @@ export function AppNav() {
   return (
     <>
       <nav className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
-        <div className="flex items-center gap-1 px-4 h-14">
-          <div className="flex items-center gap-2 mr-4">
+        <div className="flex items-center gap-1 px-3 sm:px-4 h-14">
+          <div className="flex min-w-0 items-center gap-2 mr-2 sm:mr-4">
             <img 
               src="/FOX KDS.png" 
               alt="FOX KDS" 
               className="h-8 w-auto object-contain"
             />
-            <span className="font-black text-lg text-primary">FOX KDS</span>
+            <span className="truncate font-black text-base sm:text-lg text-primary">FOX KDS</span>
           </div>
           {links.filter(link => hasPermission(link.permission)).map(link => (
             <Link
               key={link.to}
               to={link.to}
+              title={link.label}
               className={cn(
-                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                'flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                 pathname === link.to
                   ? 'bg-primary text-primary-foreground'
                   : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
               )}
             >
               <link.icon className="w-4 h-4" />
-              {link.label}
+              <span className="hidden sm:inline">{link.label}</span>
             </Link>
           ))}
           {hasPermission('settings') && (
             <button
-              className="ml-2 inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-secondary hover:bg-orange-500 hover:text-white transition-colors"
+              className="ml-2 inline-flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium bg-secondary hover:bg-orange-500 hover:text-white transition-colors"
               onClick={() => setShowConfig(true)}
+              title="Configurações"
+              type="button"
             >
               <Settings className="w-4 h-4" />
-              Configurações
+              <span className="hidden md:inline">Configurações</span>
             </button>
           )}
           <div className="ml-auto" />
           <span className="text-sm text-muted-foreground ml-3 hidden sm:inline">{displayUsername}</span>
           <button
-            className="ml-2 inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+            className="ml-2 inline-flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
             onClick={logout}
             type="button"
+            title="Sair"
           >
             <LogOut className="w-4 h-4" />
-            Sair
+            <span className="hidden md:inline">Sair</span>
           </button>
         </div>
       </nav>

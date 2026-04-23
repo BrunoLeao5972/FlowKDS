@@ -383,9 +383,13 @@ function parseServiceModeFromRow(row) {
   return aliasMap[normalized] || null;
 }
 
+function normalizeServiceModeKey(rawMode) {
+  return parseServiceModeFromRow({ servicemode: rawMode }) || '';
+}
+
 function groupRowsToOrders(rows) {
   const grouped = new Map();
-  const keepDeliveredPrincipalModes = new Set(['mesa', 'cartao', 'apartamento']);
+  const keepDeliveredPrincipalModes = new Set(['balcao', 'mesa', 'cartao', 'delivery', 'encomenda', 'apartamento']);
 
   for (const rawRow of rows) {
     const row = lowerCaseKeys(rawRow);
@@ -449,17 +453,17 @@ function groupRowsToOrders(rows) {
     const isItemDelivered = Number.isFinite(rawItemStatusNum) && rawItemStatusNum >= 0 && (rawItemStatusNum & 64) !== 0;
 
     const itemStatus = normalizeStatus(row.itemstatus ?? row.status);
-    const effectiveServiceMode = current.serviceMode || parseServiceModeFromRow(row);
+    const effectiveServiceMode = normalizeServiceModeKey(current.serviceMode || parseServiceModeFromRow(row));
     const shouldKeepDeliveredPrincipalItem = keepDeliveredPrincipalModes.has(effectiveServiceMode || '');
     if (isItemDelivered) {
       current.hasDeliveredItems = true;
       if (!shouldKeepDeliveredPrincipalItem) {
-        // Fora de mesa/cartao/apartamento, mantém comportamento legado de não reenviar item entregue.
+        // Fora de balcao/mesa/cartao/delivery/encomenda/apartamento, mantém comportamento legado de não reenviar item entregue.
         console.log(`[sql2014-bridge] item já entregue ignorado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
         continue;
       }
 
-      // Mesa/cartão/apartamento: mantém item principal no payload para não perder itens em pedidos mistos
+      // Balcão/mesa/cartão/delivery/encomenda/apartamento: mantém item principal no payload para não perder itens em pedidos mistos
       // (ex.: um item com status 64 e outro com status 0 no mesmo pedido).
       console.log(`[sql2014-bridge] item com status entregue detectado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
     } else if (itemStatus === 'cancelled') {
@@ -869,7 +873,9 @@ async function syncCycle(pool, state, queryText, options = {}) {
   let updated = 0;
   let skipped = 0;
   let maxSyncDate = new Date(state.lastSyncAt);
-  const keepDeliveredOrderModes = new Set(['mesa', 'cartao', 'apartamento']);
+  // Encomenda não deve entrar no KDS pela transição de pagamento/entrega;
+  // deve entrar apenas no lançamento inicial do pedido.
+  const keepDeliveredOrderModes = new Set(['balcao', 'mesa', 'cartao', 'delivery', 'apartamento']);
 
   for (const row of orders) {
     const externalId = String(row.externalId || '').trim();
@@ -887,13 +893,16 @@ async function syncCycle(pool, state, queryText, options = {}) {
     }
 
     const mappedStatus = normalizeStatus(row.status);
-    const mode = String(row.serviceMode || '').trim().toLowerCase();
+    const mode = normalizeServiceModeKey(row.serviceMode);
     const shouldAllowDeliveredUnseen = mappedStatus === 'delivered' && keepDeliveredOrderModes.has(mode);
     const currentItems = Array.isArray(row.items) ? row.items : [];
     const previousItemsSnapshot = state.lastItemsSnapshotByExternalId?.[externalId] || {};
     const deltaItems = getDeltaItems(currentItems, previousItemsSnapshot);
     const hasDemandScope = Boolean(demandId);
-    let kdsId = hasDemandScope ? state.idMap[syncKey] : (state.idMap[syncKey] || state.idMap[externalId]);
+    // Fallback por externalId evita perder vínculo quando demandId muda por atualização da SQL.
+    let kdsId = hasDemandScope
+      ? (state.idMap[syncKey] || state.idMap[externalId])
+      : (state.idMap[syncKey] || state.idMap[externalId]);
 
     const blocked = hasDemandScope
       ? state.blockedExternalIds?.[syncKey]
@@ -904,7 +913,7 @@ async function syncCycle(pool, state, queryText, options = {}) {
     }
 
     // Se o pedido já veio como entregue e ainda não existe no KDS, por padrão não cria para evitar poluição.
-    // Exceção: mesa/cartão/apartamento podem chegar da origem já com flag "entregue" no lançamento,
+    // Exceção: balcao/mesa/cartão/delivery/apartamento podem chegar da origem já com flag "entregue" no lançamento,
     // mas ainda precisam aparecer no KDS (caso real: mesa 02 com pedidos 114898/114899).
     if (mappedStatus === 'delivered' && !kdsId) {
       if (!keepDeliveredOrderModes.has(mode)) {
@@ -929,53 +938,33 @@ async function syncCycle(pool, state, queryText, options = {}) {
     const itemsToSend = kdsId ? currentItems : (deltaItems.length > 0 ? deltaItems : currentItems);
 
     try {
-      const syncedOrder = await createOrderInKds({
-        number: row.number,
-        customername: row.customerName,
-        lancamentoId: row.lancamentoId,
-        serviceMode: row.serviceMode,
-        attendant: row.attendant,
-        integrator: row.integrator,
-        sellerName: row.sellerName,
-        observations: row.observations,
-        itemsjson: itemsToSend,
-        externalid: externalId,
-        demandId,
-        updatedAt: updatedAt.toISOString(),
-      }, {
-        suppressAutoPrint: options.suppressAutoPrint === true,
-      });
+      // Se já existe mapeamento no KDS, não reposta /orders para evitar duplicidade
+      // em atualizações de pagamento/entrega (caso comum em encomenda).
+      if (!kdsId) {
+        const syncedOrder = await createOrderInKds({
+          number: row.number,
+          customername: row.customerName,
+          lancamentoId: row.lancamentoId,
+          serviceMode: row.serviceMode,
+          attendant: row.attendant,
+          integrator: row.integrator,
+          sellerName: row.sellerName,
+          observations: row.observations,
+          itemsjson: itemsToSend,
+          externalid: externalId,
+          demandId,
+          updatedAt: updatedAt.toISOString(),
+        }, {
+          suppressAutoPrint: options.suppressAutoPrint === true,
+        });
 
-      const syncedOrderId = String(syncedOrder?.id || '').trim() || null;
-      if (syncedOrderId) {
-        if (!kdsId) {
+        const syncedOrderId = String(syncedOrder?.id || '').trim() || null;
+        if (syncedOrderId) {
           kdsId = syncedOrderId;
           state.idMap[syncKey] = kdsId;
+          state.idMap[externalId] = kdsId;
           await saveState(state); // salva imediatamente para evitar duplicata em caso de crash
           created += 1;
-        } else if (kdsId !== syncedOrderId) {
-          console.warn(
-            `[sql2014-bridge] bloqueando replay de pedido removido: key=${syncKey} kdsId antigo=${kdsId} novo=${syncedOrderId}`
-          );
-
-          // Se o pedido antigo foi removido no KDS/Mongo, nao ressuscitar automaticamente.
-          try {
-            await callKdsApi(`/orders/${encodeURIComponent(syncedOrderId)}`, { method: 'DELETE' });
-          } catch (deleteError) {
-            console.warn(
-              `[sql2014-bridge] falha ao remover replay externo key=${syncKey} kdsId=${syncedOrderId}: ${String(deleteError?.message || deleteError || '')}`
-            );
-          }
-
-          state.blockedExternalIds[syncKey] = {
-            blockedAt: new Date().toISOString(),
-            lastUpdatedAt: updatedAt.toISOString(),
-            reason: `stale_mapping_resurrection_blocked old=${kdsId} new=${syncedOrderId}`,
-          };
-          delete state.idMap[syncKey];
-          await saveState(state);
-          skipped += 1;
-          continue;
         }
       }
 

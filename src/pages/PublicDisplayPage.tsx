@@ -39,14 +39,14 @@ function normalizeServiceMode(value: unknown): ServiceMode | null {
 
 /**
  * Retorna o número a exibir para o pedido no painel de retirada.
- * Para delivery/encomenda: últimos 3 dígitos do lancamentoId
+ * Para balcao/delivery/encomenda: últimos 3 dígitos do lancamentoId
  * Para outros: order.number
  */
 function getDisplayOrderNumber(order: any): string {
   const mode = order.serviceMode;
-  const isDeliveryOrEncomenda = mode === 'delivery' || mode === 'encomenda';
+  const usesLaunchSuffix = mode === 'balcao' || mode === 'delivery' || mode === 'encomenda';
 
-  if (isDeliveryOrEncomenda) {
+  if (usesLaunchSuffix) {
     const digits = String(order.lancamentoId || '').replace(/\D/g, '');
     if (digits.length >= 3) {
       return digits.slice(-3);
@@ -121,6 +121,16 @@ function PublicDisplayContent() {
   const [secretBuffer, setSecretBuffer] = useState('');
   const [showModeFeedback, setShowModeFeedback] = useState(false);
   const prevReadyIdsRef = useRef<Set<string>>(new Set());
+  const panelCallAudioRef = useRef<HTMLAudioElement | null>(null);
+  const pendingPanelCallRef = useRef(false);
+
+  const resolveSoundUrl = (raw: string) => {
+    try {
+      return decodeURI(raw);
+    } catch {
+      return raw;
+    }
+  };
 
   useEffect(() => {
     const interval = setInterval(() => setTick(t => t + 1), 3000);
@@ -177,6 +187,50 @@ function PublicDisplayContent() {
     .filter(o => o.status === 'ready' && isDisplayMode(o.serviceMode) && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => (b.readyAt?.getTime() || 0) - (a.readyAt?.getTime() || 0));
 
+  // Mantém um único elemento de áudio pré-carregado para reduzir bloqueios e latência.
+  useEffect(() => {
+    if (!settings.panelCallSoundEnabled || !settings.panelCallSound) {
+      panelCallAudioRef.current = null;
+      pendingPanelCallRef.current = false;
+      return;
+    }
+
+    const audio = new Audio(resolveSoundUrl(settings.panelCallSound));
+    audio.preload = 'auto';
+    panelCallAudioRef.current = audio;
+    pendingPanelCallRef.current = false;
+
+    return () => {
+      panelCallAudioRef.current = null;
+    };
+  }, [settings.panelCallSoundEnabled, settings.panelCallSound]);
+
+  // Se autoplay for bloqueado, reexecuta ao primeiro gesto do usuário na tela do painel.
+  useEffect(() => {
+    const tryReplayAfterInteraction = () => {
+      if (!pendingPanelCallRef.current) return;
+      const audio = panelCallAudioRef.current;
+      if (!audio) return;
+
+      audio.currentTime = 0;
+      audio.play()
+        .then(() => {
+          pendingPanelCallRef.current = false;
+        })
+        .catch(() => {
+          // Mantém pendente até uma interação subsequente.
+        });
+    };
+
+    window.addEventListener('pointerdown', tryReplayAfterInteraction, { passive: true });
+    window.addEventListener('keydown', tryReplayAfterInteraction);
+
+    return () => {
+      window.removeEventListener('pointerdown', tryReplayAfterInteraction);
+      window.removeEventListener('keydown', tryReplayAfterInteraction);
+    };
+  }, []);
+
   // Toca o som de chamada no painel sempre que um novo pedido ficar pronto.
   useEffect(() => {
     const currentIds = new Set(readyOrders.map(o => o.id));
@@ -185,12 +239,16 @@ function PublicDisplayContent() {
     prevReadyIdsRef.current = currentIds;
 
     if (hasNew && settings.panelCallSoundEnabled && settings.panelCallSound) {
-      try {
-        // Decodifica a URL para remover encoding (ex: %20 -> espaço)
-        const soundUrl = decodeURI(settings.panelCallSound);
-        new Audio(soundUrl).play().catch(() => {});
-      } catch {
-        // ignore autoplay restrictions
+      const audio = panelCallAudioRef.current;
+      if (audio) {
+        audio.currentTime = 0;
+        audio.play()
+          .then(() => {
+            pendingPanelCallRef.current = false;
+          })
+          .catch(() => {
+            pendingPanelCallRef.current = true;
+          });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

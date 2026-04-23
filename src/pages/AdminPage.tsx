@@ -107,8 +107,8 @@ function getOrderReferenceDate(order: Order): Date {
 }
 
 function getPickupDisplayNumber(order: Order): string {
-  const isDeliveryOrEncomenda = order.serviceMode === 'delivery' || order.serviceMode === 'encomenda';
-  if (isDeliveryOrEncomenda) {
+  const usesLaunchSuffix = order.serviceMode === 'balcao' || order.serviceMode === 'delivery' || order.serviceMode === 'encomenda';
+  if (usesLaunchSuffix) {
     const digits = String(order.lancamentoId || '').replace(/\D/g, '');
     if (digits.length >= 3) {
       return digits.slice(-3);
@@ -390,17 +390,17 @@ export default function AdminPage() {
                               <span className="text-xs font-semibold">{modeConfig?.label}</span>
                             </span>
                           )}
-                          {order.externalId && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-                              Pedido nº: {order.externalId}
-                            </span>
-                          )}
                           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium text-primary-foreground ${cfg.colorClass}`}>
                             <Icon className="w-3 h-3" />
                             {STATUS_LABELS[order.status]}
                           </span>
                         </div>
                         <p className="text-sm text-muted-foreground">{getAdminCustomerName(order.customerName)}</p>
+                        {order.externalId && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Pedido nº: {order.externalId}
+                          </p>
+                        )}
                       </div>
                       <div className="text-sm text-muted-foreground">{formatTime(order.createdAt)}</div>
                     </div>

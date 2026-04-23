@@ -44,6 +44,14 @@ const normalizeServiceMode = (value: unknown): ServiceMode | null => {
     encomenda: 'encomenda',
     servico: 'servico',
     apartamento: 'apartamento',
+    // Compatibilidade com códigos numéricos da integração SQL
+    '1': 'balcao',
+    '16': 'balcao',
+    '2': 'mesa',
+    '17': 'mesa',
+    '3': 'cartao',
+    '4': 'delivery',
+    '5': 'encomenda',
   };
 
   return aliases[normalized] || null;
@@ -85,7 +93,7 @@ const dedupeOrders = (orders: Order[]) => {
 
 const getTicketDisplayNumber = (order: Pick<Order, 'number' | 'serviceMode' | 'lancamentoId'>): number => {
   const mode = normalizeServiceMode(order.serviceMode);
-  if (mode === 'delivery' || mode === 'encomenda') {
+  if (mode === 'balcao' || mode === 'delivery' || mode === 'encomenda') {
     const digits = String(order.lancamentoId || '').replace(/\D/g, '');
     if (digits.length >= 3) {
       const pickupNumber = Number(digits.slice(-3));
@@ -264,6 +272,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
             printScale: settings.printScale,
             orderNumber: createdOrder.number,
             lancamentoId: (createdOrder as any).lancamentoId || null,
+            externalId: (createdOrder as any).externalId || null,
+            launchCode: (createdOrder as any).launchCode || null,
             customerName: createdOrder.customerName,
             serviceMode: createdOrder.serviceMode,
             attendant: createdOrder.attendant,
@@ -289,6 +299,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           printScale: settings.printScale,
           orderNumber: createdOrder.number,
           lancamentoId: (createdOrder as any).lancamentoId || null,
+          externalId: (createdOrder as any).externalId || null,
+          launchCode: (createdOrder as any).launchCode || null,
           customerName: createdOrder.customerName,
           serviceMode: createdOrder.serviceMode,
           attendant: createdOrder.attendant,
@@ -343,6 +355,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
           printScale: settings.printScale,
           orderNumber: orderToPrint.number,
           lancamentoId: (orderToPrint as any).lancamentoId || null,
+          externalId: (orderToPrint as any).externalId || null,
+          launchCode: (orderToPrint as any).launchCode || null,
           customerName: orderToPrint.customerName,
           serviceMode: orderToPrint.serviceMode,
           attendant: orderToPrint.attendant,

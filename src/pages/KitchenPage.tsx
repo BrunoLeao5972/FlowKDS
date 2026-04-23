@@ -75,9 +75,9 @@ function formatItemNote(raw?: string) {
 
 function getKdsDemandHeaderNumber(order: Order): string {
   const mode = order.serviceMode;
-  const isDeliveryOrEncomenda = mode === 'delivery' || mode === 'encomenda';
+  const usesLaunchSuffix = mode === 'balcao' || mode === 'delivery' || mode === 'encomenda';
 
-  if (isDeliveryOrEncomenda) {
+  if (usesLaunchSuffix) {
     const digits = String(order.lancamentoId || '').replace(/\D/g, '');
     if (digits.length >= 3) {
       return digits.slice(-3);

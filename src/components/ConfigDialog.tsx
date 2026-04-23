@@ -109,16 +109,16 @@ type RequiredRestaurantField =
 
 const BUILTIN_SONG_OPTIONS = [
   {
-    value: '/Songs/Efeito Sonoro - Chegou Pedido.mp3',
-    label: 'Efeito Sonoro - Chegou Pedido',
-  },
-  {
-    value: '/Songs/Efeito Sonoro - Pedido Pronto.mp3',
-    label: 'Efeito Sonoro - Pedido Pronto',
+    value: '/Songs/Efeito Sonoro - Novo Pedido.mp3',
+    label: 'Efeito Sonoro - Novo Pedido',
   },
   {
     value: '/Songs/Efeito Sonoro - Painel de Retirada.mp3',
     label: 'Efeito Sonoro - Painel de Retirada',
+  },
+  {
+    value: '/Songs/Efeito Sonoro - Chamada no Painel.mp3',
+    label: 'Efeito Sonoro - Chamada no Painel',
   },
 ] as const;
 
@@ -259,7 +259,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [readyOrderSoundData, setReadyOrderSoundDataLocal] = useState<string | null>(settings.readyOrderSound || null);
   const [newOrderEnabled, setNewOrderEnabledLocal] = useState<boolean>(settings.newOrderSoundEnabled ?? true);
   const [readyEnabled, setReadyEnabledLocal] = useState<boolean>(settings.readyOrderSoundEnabled ?? true);
-  const [panelCallSoundData, setPanelCallSoundDataLocal] = useState<string | null>(settings.panelCallSound || '/Songs/Efeito Sonoro - Painel de Retirada.mp3');
+  const [panelCallSoundData, setPanelCallSoundDataLocal] = useState<string | null>(settings.panelCallSound || '/Songs/Efeito Sonoro - Chamada no Painel.mp3');
   const [panelCallEnabled, setPanelCallEnabledLocal] = useState<boolean>(settings.panelCallSoundEnabled ?? true);
 
   // Wrappers que persistem imediatamente no SettingsContext (sem precisar clicar em Salvar)

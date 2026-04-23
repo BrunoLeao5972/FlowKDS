@@ -10,8 +10,8 @@ SELECT
   CAST(l.LancamentoID AS VARCHAR(100)) AS lancamentoId,
   CAST(pp.PedidoID AS VARCHAR(100)) AS pedidoCodigo,
   
-  -- Número da mesa/atendimento
-  CAST(l.Atendimento AS INT) AS number,
+  -- Número do atendimento; delivery/encomenda têm Atendimento=0, usa PedidoID como fallback
+  CAST(COALESCE(NULLIF(l.Atendimento, 0), pp.PedidoID) AS INT) AS number,
   
   -- Cliente
   CASE

@@ -42,8 +42,9 @@ const PRINT_PEDIDO_MODO = String(process.env.PRINT_PEDIDO_MODO || 'IMPRESSORA').
 const PRINT_PEDIDO_IMPRESSORA = String(process.env.PRINT_PEDIDO_IMPRESSORA || '').trim();
 const PRINT_PEDIDO_OUTPUT_DIR = String(process.env.PRINT_PEDIDO_OUTPUT_DIR || '').trim();
 const FIXED_PRINT_SCALE = 115;
-const DEFAULT_NEW_ORDER_SOUND = '/Songs/Efeito Sonoro - Chegou Pedido.mp3';
-const DEFAULT_READY_ORDER_SOUND = '/Songs/Efeito Sonoro - Pedido Pronto.mp3';
+const DEFAULT_NEW_ORDER_SOUND = '/Songs/Efeito Sonoro - Novo Pedido.mp3';
+const DEFAULT_READY_ORDER_SOUND = '/Songs/Efeito Sonoro - Painel de Retirada.mp3';
+const DEFAULT_PANEL_CALL_SOUND = '/Songs/Efeito Sonoro - Chamada no Painel.mp3';
 const REPORT_IDLE_BREAK_MINUTES = Number(process.env.REPORT_IDLE_BREAK_MINUTES || 180);
 
 app.use(cors({ origin: CORS_ORIGIN }));
@@ -307,13 +308,23 @@ function normalizeServiceMode(rawServiceMode) {
 
   const map = {
     balcao: 'balcao',
+    balcon: 'balcao',
     mesa: 'mesa',
     cartao: 'cartao',
+    cartao_consumacao: 'cartao',
     delivery: 'delivery',
     entrega: 'delivery',
     encomenda: 'encomenda',
     servico: 'servico',
     apartamento: 'apartamento',
+    // Compatibilidade com códigos numéricos vindos da integração SQL
+    '1': 'balcao',
+    '16': 'balcao',
+    '2': 'mesa',
+    '17': 'mesa',
+    '3': 'cartao',
+    '4': 'delivery',
+    '5': 'encomenda',
   };
 
   return map[normalized] || null;
@@ -376,16 +387,19 @@ function parseTimestamp(raw) {
   return undefined;
 }
 
-function resolveTicketOrderNumber({ orderNumber, serviceMode, lancamentoId }) {
-  const mode = String(serviceMode || '').trim().toLowerCase();
+function resolveTicketOrderNumber({ orderNumber, serviceMode, lancamentoId, externalId, launchCode }) {
+  const mode = normalizeServiceMode(serviceMode);
   const numericOrderNumber = Number(orderNumber || 0);
 
-  if (mode === 'delivery' || mode === 'encomenda') {
-    const digits = String(lancamentoId || '').replace(/\D/g, '');
-    if (digits.length >= 3) {
-      const pickupNumber = Number(digits.slice(-3));
-      if (Number.isFinite(pickupNumber) && pickupNumber > 0) {
-        return pickupNumber;
+  if (mode === 'balcao' || mode === 'delivery' || mode === 'encomenda') {
+    const candidates = [lancamentoId, externalId, launchCode];
+    for (const candidate of candidates) {
+      const digits = String(candidate || '').replace(/\D/g, '');
+      if (digits.length >= 3) {
+        const pickupNumber = Number(digits.slice(-3));
+        if (Number.isFinite(pickupNumber) && pickupNumber > 0) {
+          return pickupNumber;
+        }
       }
     }
   }
@@ -696,11 +710,11 @@ function normalizeRestaurantPayload(payload) {
     lastResetDate: raw.lastResetDate ? toSafeString(raw.lastResetDate) : null,
     licenseFileName: raw.licenseFileName === null ? null : (raw.licenseFileName ? toSafeString(raw.licenseFileName) : null),
     licenseContent: raw.licenseContent === null ? null : (raw.licenseContent ? String(raw.licenseContent) : null),
-    newOrderSound: raw.newOrderSound === null ? DEFAULT_NEW_ORDER_SOUND : (raw.newOrderSound ? String(raw.newOrderSound) : DEFAULT_NEW_ORDER_SOUND),
-    readyOrderSound: raw.readyOrderSound === null ? DEFAULT_READY_ORDER_SOUND : (raw.readyOrderSound ? String(raw.readyOrderSound) : DEFAULT_READY_ORDER_SOUND),
+    newOrderSound: normalizeSoundSource(raw.newOrderSound, DEFAULT_NEW_ORDER_SOUND, 'new'),
+    readyOrderSound: normalizeSoundSource(raw.readyOrderSound, DEFAULT_READY_ORDER_SOUND, 'ready'),
     newOrderSoundEnabled: toSafeBoolean(raw.newOrderSoundEnabled, true),
     readyOrderSoundEnabled: toSafeBoolean(raw.readyOrderSoundEnabled, true),
-    panelCallSound: raw.panelCallSound === null ? DEFAULT_READY_ORDER_SOUND : (raw.panelCallSound ? String(raw.panelCallSound) : DEFAULT_READY_ORDER_SOUND),
+    panelCallSound: normalizeSoundSource(raw.panelCallSound, DEFAULT_PANEL_CALL_SOUND, 'panel'),
     panelCallSoundEnabled: toSafeBoolean(raw.panelCallSoundEnabled, true),
     printerName: toSafeString(raw.printerName),
     printSize,
@@ -715,6 +729,21 @@ function normalizeRestaurantPayload(payload) {
       : [],
     autoPrep: toSafeBoolean(raw.autoPrep, false),
   };
+}
+
+function normalizeSoundSource(value, fallback, channel) {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+
+  if (raw === '/Songs/Efeito Sonoro - Chegou.mp3' || raw === '/Songs/Efeito Sonoro - Chegou Pedido.mp3') {
+    return DEFAULT_NEW_ORDER_SOUND;
+  }
+
+  if (raw === '/Songs/Efeito Sonoro - Pedido Pronto.mp3') {
+    return channel === 'panel' ? DEFAULT_PANEL_CALL_SOUND : DEFAULT_READY_ORDER_SOUND;
+  }
+
+  return raw;
 }
 
 function updateEnvFile(updates) {
@@ -978,7 +1007,7 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
       readyOrderSound: DEFAULT_READY_ORDER_SOUND,
       newOrderSoundEnabled: true,
       readyOrderSoundEnabled: true,
-      panelCallSound: DEFAULT_READY_ORDER_SOUND,
+      panelCallSound: DEFAULT_PANEL_CALL_SOUND,
       panelCallSoundEnabled: true,
       printerName: '',
       printSize: '80mm',
@@ -1010,11 +1039,11 @@ app.get('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     lastResetDate: existing.lastResetDate || null,
     licenseFileName: existing.licenseFileName ?? null,
     licenseContent: existing.licenseContent ?? null,
-    newOrderSound: existing.newOrderSound || DEFAULT_NEW_ORDER_SOUND,
-    readyOrderSound: existing.readyOrderSound || DEFAULT_READY_ORDER_SOUND,
+    newOrderSound: normalizeSoundSource(existing.newOrderSound, DEFAULT_NEW_ORDER_SOUND, 'new'),
+    readyOrderSound: normalizeSoundSource(existing.readyOrderSound, DEFAULT_READY_ORDER_SOUND, 'ready'),
     newOrderSoundEnabled: existing.newOrderSoundEnabled ?? true,
     readyOrderSoundEnabled: existing.readyOrderSoundEnabled ?? true,
-    panelCallSound: existing.panelCallSound || DEFAULT_READY_ORDER_SOUND,
+    panelCallSound: normalizeSoundSource(existing.panelCallSound, DEFAULT_PANEL_CALL_SOUND, 'panel'),
     panelCallSoundEnabled: existing.panelCallSoundEnabled ?? true,
     printerName: existing.printerName || '',
     printSize: existing.printSize || '80mm',
@@ -1073,11 +1102,11 @@ app.put('/settings/restaurant', authMiddleware, asyncHandler(async (req, res) =>
     lastResetDate: saved.lastResetDate || null,
     licenseFileName: saved.licenseFileName ?? null,
     licenseContent: saved.licenseContent ?? null,
-    newOrderSound: saved.newOrderSound || DEFAULT_NEW_ORDER_SOUND,
-    readyOrderSound: saved.readyOrderSound || DEFAULT_READY_ORDER_SOUND,
+    newOrderSound: normalizeSoundSource(saved.newOrderSound, DEFAULT_NEW_ORDER_SOUND, 'new'),
+    readyOrderSound: normalizeSoundSource(saved.readyOrderSound, DEFAULT_READY_ORDER_SOUND, 'ready'),
     newOrderSoundEnabled: saved.newOrderSoundEnabled ?? true,
     readyOrderSoundEnabled: saved.readyOrderSoundEnabled ?? true,
-    panelCallSound: saved.panelCallSound || DEFAULT_READY_ORDER_SOUND,
+    panelCallSound: normalizeSoundSource(saved.panelCallSound, DEFAULT_PANEL_CALL_SOUND, 'panel'),
     panelCallSoundEnabled: saved.panelCallSoundEnabled ?? true,
     printerName: saved.printerName || '',
     printSize: saved.printSize || '80mm',
@@ -1098,10 +1127,14 @@ app.post('/print/ticket', authMiddleware, asyncHandler(async (req, res) => {
   const orderNumber = Number(body.orderNumber || 0);
   const serviceMode = String(body.serviceMode || '').trim().toLowerCase() || null;
   const lancamentoId = String(body.lancamentoId ?? body.lancamentoid ?? '').trim() || null;
+  const externalId = String(body.externalId ?? body.externalid ?? '').trim() || null;
+  const launchCode = String(body.launchCode ?? body.launchcode ?? '').trim() || null;
   const effectiveOrderNumber = resolveTicketOrderNumber({
     orderNumber,
     serviceMode,
     lancamentoId,
+    externalId,
+    launchCode,
   });
   const printerName = String(body.printerName || '').trim();
 
@@ -1954,6 +1987,7 @@ app.post('/orders', asyncHandler(async (req, res) => {
       orderNumber: order.number,
       serviceMode: order.serviceMode,
       lancamentoId: order.lancamentoId,
+      externalId: order.externalId,
     });
     console.log(`[print-pedido] AUTO_ENABLED ativada - tentando imprimir pedido #${printOrderNumber}`);
     setImmediate(async () => {

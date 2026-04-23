@@ -80,17 +80,21 @@ type Settings = {
 
 const STORAGE_KEY = 'kds:settings:v1';
 const FIXED_PRINT_SCALE = 115;
-const DEFAULT_NEW_ORDER_SOUND = '/Songs/Efeito Sonoro - Chegou Pedido.mp3';
-const DEFAULT_READY_ORDER_SOUND = '/Songs/Efeito Sonoro - Pedido Pronto.mp3';
-const DEFAULT_PANEL_CALL_SOUND = '/Songs/Efeito Sonoro - Painel de Retirada.mp3';
+const DEFAULT_NEW_ORDER_SOUND = '/Songs/Efeito Sonoro - Novo Pedido.mp3';
+const DEFAULT_READY_ORDER_SOUND = '/Songs/Efeito Sonoro - Painel de Retirada.mp3';
+const DEFAULT_PANEL_CALL_SOUND = '/Songs/Efeito Sonoro - Chamada no Painel.mp3';
 
 function normalizeSoundSource(value: unknown, fallback: string): string {
   const raw = String(value || '').trim();
   if (!raw) return fallback;
 
-  // Migra caminho legado que nao existe mais no pacote atual.
-  if (raw === '/Songs/Efeito Sonoro - Chegou.mp3') {
+  // Migra caminhos legados para os arquivos fixos do pacote atual.
+  if (raw === '/Songs/Efeito Sonoro - Chegou.mp3' || raw === '/Songs/Efeito Sonoro - Chegou Pedido.mp3') {
     return DEFAULT_NEW_ORDER_SOUND;
+  }
+
+  if (raw === '/Songs/Efeito Sonoro - Pedido Pronto.mp3') {
+    return fallback === DEFAULT_PANEL_CALL_SOUND ? DEFAULT_PANEL_CALL_SOUND : DEFAULT_READY_ORDER_SOUND;
   }
 
   return raw;
@@ -276,67 +280,106 @@ export const SettingsProvider: React.FC<React.PropsWithChildren<{}>> = ({ childr
   // Busca dados cadastrais do restaurante no backend quando disponível.
   useEffect(() => {
     const loadRestaurantFromDatabase = async () => {
+      const MAX_RETRIES = 3;
+      const INITIAL_DELAY_MS = 1000;
+      const FETCH_TIMEOUT_MS = 15000; // 15s para conexões móveis lentas
+
+      const fetchWithTimeout = (url: string, options: RequestInit, timeoutMs: number) =>
+        Promise.race([
+          fetch(url, options),
+          new Promise<Response>((_, reject) =>
+            setTimeout(() => reject(new Error('fetch_timeout')), timeoutMs)
+          ),
+        ]);
+
       try {
         const token = localStorage.getItem('kds_auth_token') || '';
-        const response = await fetch(`${getApiBase()}/settings/restaurant`, {
-          method: 'GET',
-          headers: {
-            ...(token ? { 'x-kds-token': token } : {}),
-          },
-        });
-        if (!response.ok) return;
+        let lastError: Error | null = null;
 
-        const data = await response.json();
-        if (typeof data.tempoMedio === 'number') setTempoMedio(data.tempoMedio);
-        if (typeof data.tempoAlerta === 'number') setTempoAlerta(data.tempoAlerta);
-        if (typeof data.tempoCritico === 'number') setTempoCritico(data.tempoCritico);
-        if (typeof data.tradeName === 'string') setRestaurantTradeName(data.tradeName);
-        if (typeof data.legalName === 'string') setRestaurantLegalName(data.legalName);
-        if (typeof data.cnpj === 'string') setRestaurantCnpj(data.cnpj);
-        if (typeof data.cep === 'string') setRestaurantCep(data.cep);
-        if (typeof data.street === 'string') setRestaurantStreet(data.street);
-        if (typeof data.number === 'string') setRestaurantNumber(data.number);
-        if (typeof data.city === 'string') setRestaurantCity(data.city);
-        if (typeof data.complement === 'string') setRestaurantComplement(data.complement);
-        if (data.orderNumberMode === 'continuous' || data.orderNumberMode === 'daily-reset' || data.orderNumberMode === 'custom-start') {
-          setOrderNumberMode(data.orderNumberMode);
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const response = await fetchWithTimeout(`${getApiBase()}/settings/restaurant`, {
+              method: 'GET',
+              headers: {
+                ...(token ? { 'x-kds-token': token } : {}),
+              },
+            }, FETCH_TIMEOUT_MS);
+
+            if (!response.ok) {
+              lastError = new Error(`HTTP ${response.status}`);
+              if (attempt < MAX_RETRIES) {
+                const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+              continue;
+            }
+
+            const data = await response.json();
+            if (typeof data.tempoMedio === 'number') setTempoMedio(data.tempoMedio);
+            if (typeof data.tempoAlerta === 'number') setTempoAlerta(data.tempoAlerta);
+            if (typeof data.tempoCritico === 'number') setTempoCritico(data.tempoCritico);
+            if (typeof data.tradeName === 'string') setRestaurantTradeName(data.tradeName);
+            if (typeof data.legalName === 'string') setRestaurantLegalName(data.legalName);
+            if (typeof data.cnpj === 'string') setRestaurantCnpj(data.cnpj);
+            if (typeof data.cep === 'string') setRestaurantCep(data.cep);
+            if (typeof data.street === 'string') setRestaurantStreet(data.street);
+            if (typeof data.number === 'string') setRestaurantNumber(data.number);
+            if (typeof data.city === 'string') setRestaurantCity(data.city);
+            if (typeof data.complement === 'string') setRestaurantComplement(data.complement);
+            if (data.orderNumberMode === 'continuous' || data.orderNumberMode === 'daily-reset' || data.orderNumberMode === 'custom-start') {
+              setOrderNumberMode(data.orderNumberMode);
+            }
+            if (typeof data.customStartNumber === 'number') setCustomStartNumber(data.customStartNumber);
+            if (typeof data.lastResetDate === 'string' || data.lastResetDate === null) setLastResetDate(data.lastResetDate ?? null);
+            if (typeof data.licenseFileName === 'string' || data.licenseFileName === null) setLicenseFileName(data.licenseFileName ?? null);
+            if (typeof data.licenseContent === 'string' || data.licenseContent === null) setLicenseContent(data.licenseContent ?? null);
+            if (typeof data.newOrderSound === 'string' || data.newOrderSound === null) {
+              setNewOrderSound(normalizeSoundSource(data.newOrderSound, DEFAULT_NEW_ORDER_SOUND));
+            }
+            if (typeof data.readyOrderSound === 'string' || data.readyOrderSound === null) {
+              setReadyOrderSound(normalizeSoundSource(data.readyOrderSound, DEFAULT_READY_ORDER_SOUND));
+            }
+            if (typeof data.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(data.newOrderSoundEnabled);
+            if (typeof data.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(data.readyOrderSoundEnabled);
+            if (typeof data.panelCallSound === 'string' || data.panelCallSound === null) {
+              setPanelCallSound(normalizeSoundSource(data.panelCallSound, DEFAULT_PANEL_CALL_SOUND));
+            }
+            if (typeof data.panelCallSoundEnabled === 'boolean') setPanelCallSoundEnabled(data.panelCallSoundEnabled);
+            if (typeof data.printerName === 'string') setPrinterName(data.printerName);
+            if (data.printSize === '58mm' || data.printSize === '80mm' || data.printSize === 'A4') setPrintSize(data.printSize);
+            if (typeof data.printScale === 'number' && Number.isFinite(data.printScale)) setPrintScale(data.printScale);
+            if (typeof data.panelColor === 'string') setPanelColor(data.panelColor);
+            if (typeof data.animationsEnabled === 'boolean') setAnimationsEnabled(data.animationsEnabled);
+            if (typeof data.autoPrep === 'boolean') setAutoPrep(data.autoPrep);
+            if (Array.isArray(data.enabledServiceModes)) {
+              const normalizedModes = data.enabledServiceModes
+                .map((mode: unknown) => String(mode || '').trim().toLowerCase())
+                .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
+              setEnabledServiceModes(normalizedModes.length ? [...new Set(normalizedModes)] : [...ALL_SERVICE_MODES]);
+            }
+            if (Array.isArray(data.panelEnabledServiceModes)) {
+              const normalizedPanelModes = data.panelEnabledServiceModes
+                .map((mode: unknown) => String(mode || '').trim().toLowerCase())
+                .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
+              setPanelEnabledServiceModes(normalizedPanelModes.length ? [...new Set(normalizedPanelModes)] : [...defaultValues.panelEnabledServiceModes]);
+            }
+            return; // Sucesso - não tenta mais
+          } catch (err) {
+            lastError = err instanceof Error ? err : new Error(String(err));
+            if (attempt < MAX_RETRIES) {
+              const delay = INITIAL_DELAY_MS * Math.pow(2, attempt - 1);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            }
+          }
         }
-        if (typeof data.customStartNumber === 'number') setCustomStartNumber(data.customStartNumber);
-        if (typeof data.lastResetDate === 'string' || data.lastResetDate === null) setLastResetDate(data.lastResetDate ?? null);
-        if (typeof data.licenseFileName === 'string' || data.licenseFileName === null) setLicenseFileName(data.licenseFileName ?? null);
-        if (typeof data.licenseContent === 'string' || data.licenseContent === null) setLicenseContent(data.licenseContent ?? null);
-        if (typeof data.newOrderSound === 'string' || data.newOrderSound === null) {
-          setNewOrderSound(normalizeSoundSource(data.newOrderSound, DEFAULT_NEW_ORDER_SOUND));
-        }
-        if (typeof data.readyOrderSound === 'string' || data.readyOrderSound === null) {
-          setReadyOrderSound(normalizeSoundSource(data.readyOrderSound, DEFAULT_READY_ORDER_SOUND));
-        }
-        if (typeof data.newOrderSoundEnabled === 'boolean') setNewOrderSoundEnabled(data.newOrderSoundEnabled);
-        if (typeof data.readyOrderSoundEnabled === 'boolean') setReadyOrderSoundEnabled(data.readyOrderSoundEnabled);
-        if (typeof data.panelCallSound === 'string' || data.panelCallSound === null) {
-          setPanelCallSound(normalizeSoundSource(data.panelCallSound, DEFAULT_PANEL_CALL_SOUND));
-        }
-        if (typeof data.panelCallSoundEnabled === 'boolean') setPanelCallSoundEnabled(data.panelCallSoundEnabled);
-        if (typeof data.printerName === 'string') setPrinterName(data.printerName);
-        if (data.printSize === '58mm' || data.printSize === '80mm' || data.printSize === 'A4') setPrintSize(data.printSize);
-        if (typeof data.printScale === 'number' && Number.isFinite(data.printScale)) setPrintScale(data.printScale);
-        if (typeof data.panelColor === 'string') setPanelColor(data.panelColor);
-        if (typeof data.animationsEnabled === 'boolean') setAnimationsEnabled(data.animationsEnabled);
-        if (typeof data.autoPrep === 'boolean') setAutoPrep(data.autoPrep);
-        if (Array.isArray(data.enabledServiceModes)) {
-          const normalizedModes = data.enabledServiceModes
-            .map((mode: unknown) => String(mode || '').trim().toLowerCase())
-            .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
-          setEnabledServiceModes(normalizedModes.length ? [...new Set(normalizedModes)] : [...ALL_SERVICE_MODES]);
-        }
-        if (Array.isArray(data.panelEnabledServiceModes)) {
-          const normalizedPanelModes = data.panelEnabledServiceModes
-            .map((mode: unknown) => String(mode || '').trim().toLowerCase())
-            .filter((mode: string): mode is ServiceMode => ALL_SERVICE_MODES.includes(mode as ServiceMode));
-          setPanelEnabledServiceModes(normalizedPanelModes.length ? [...new Set(normalizedPanelModes)] : [...defaultValues.panelEnabledServiceModes]);
+
+        // Após todas as tentativas, log o erro final (para debug, não bloqueia app)
+        if (lastError) {
+          console.debug('[SettingsContext] restaurant data fetch failed after retries:', lastError.message);
         }
       } catch (error) {
-        // ignore to keep app usable offline
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.debug('[SettingsContext] loadRestaurantFromDatabase error:', err.message);
       }
     };
 
