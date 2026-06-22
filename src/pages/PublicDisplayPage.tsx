@@ -108,8 +108,8 @@ function OrderCard({ order, variant }: OrderCardProps) {
 }
 
 /**
- * Card hero do "Pedido da Vez" — exibido em destaque quando um pedido fica pronto.
- * A key baseada em order.id garante que a animação reinicia a cada novo chamado.
+ * Card central do "Pedido da Vez" — destaque moderado no centro do display.
+ * A key baseada em order.id reinicia a animação a cada novo chamado.
  */
 function CalledOrderCard({ order }: { order: any }) {
   const name = getPanelCustomerName(order.customerName);
@@ -118,31 +118,30 @@ function CalledOrderCard({ order }: { order: any }) {
   return (
     <motion.div
       key={order.id}
-      initial={{ scale: 0.88, opacity: 0 }}
+      initial={{ scale: 0.9, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
-      transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-      className="relative w-full rounded-2xl border-4 border-green-500 bg-green-50 dark:bg-green-950/40 p-6 text-center overflow-hidden"
+      transition={{ type: 'spring', stiffness: 280, damping: 22 }}
+      className="relative w-full rounded-xl border-4 border-green-500 bg-green-50 dark:bg-green-950/40 px-4 py-5 text-center overflow-hidden"
     >
-      {/* Anel pulsante de atenção */}
       <motion.div
-        className="pointer-events-none absolute inset-0 rounded-2xl border-4 border-green-400"
-        animate={{ opacity: [0.3, 0.9, 0.3], scale: [1, 1.025, 1] }}
-        transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+        className="pointer-events-none absolute inset-0 rounded-xl border-4 border-green-400"
+        animate={{ opacity: [0.25, 0.8, 0.25], scale: [1, 1.02, 1] }}
+        transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
       />
 
-      <p className="text-xs font-bold tracking-widest uppercase text-green-600 dark:text-green-400 mb-3">
+      <p className="text-[10px] font-bold tracking-widest uppercase text-green-600 dark:text-green-400 mb-2">
         🔔 Retire seu pedido
       </p>
 
       <span
-        className="text-[5rem] md:text-[6.5rem] font-black block leading-none"
+        className="text-[2.8rem] md:text-[3.8rem] font-black block leading-none"
         style={{ color: '#16a34a' }}
       >
         {getDisplayOrderNumber(order)}
       </span>
 
       {hasName && (
-        <p className="text-xl md:text-2xl mt-3 font-bold text-green-700 dark:text-green-300 break-words">
+        <p className="text-base md:text-lg mt-2 font-bold text-green-700 dark:text-green-300 break-words">
           {name}
         </p>
       )}
@@ -323,16 +322,18 @@ function PublicDisplayContent() {
         </p>
       </div>
 
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2">
-        {/* Em Preparo */}
-        <div className="md:pr-8 pb-8 md:pb-0 border-b-2 md:border-b-0 md:border-r-2 tema-border">
+      {/* Layout 3 colunas: Em Preparo | Pedido da Vez | Prontos para Retirada */}
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-[1.3fr_0.7fr_1.3fr] gap-0 overflow-hidden">
+
+        {/* Coluna esquerda — Em Preparo */}
+        <div className="md:pr-6 pb-6 md:pb-0 border-b-2 md:border-b-0 md:border-r-2 tema-border flex flex-col">
           <h2
-            className="text-2xl md:text-3xl font-black mb-4 flex items-center justify-center gap-2"
+            className="text-xl md:text-2xl font-black mb-4 flex items-center justify-center gap-2"
             style={{ color: isDarkMode ? 'var(--color-warning)' : 'var(--color-primary)' }}
           >
             🔥 EM PREPARO
           </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-2 content-start">
             <AnimatePresence>
               {preparingOrders.map(order => (
                 <OrderCard key={order.id} order={order} variant="preparing" />
@@ -340,44 +341,55 @@ function PublicDisplayContent() {
             </AnimatePresence>
           </div>
           {preparingOrders.length === 0 && (
-            <p className="text-center py-10 tema-text-secondary">Nenhum pedido em preparo</p>
+            <p className="text-center py-10 tema-text-secondary text-sm">Nenhum pedido em preparo</p>
           )}
         </div>
 
-        {/* Prontos */}
-        <div className="md:pl-8 pt-6 md:pt-0 flex flex-col gap-5 overflow-hidden">
-          <h2 className="text-2xl md:text-3xl font-black flex items-center justify-center gap-2" style={{ color: '#16a34a' }}>
+        {/* Coluna central — Pedido da Vez */}
+        <div className="md:px-6 py-4 md:py-0 border-b-2 md:border-b-0 md:border-r-2 tema-border flex flex-col items-center justify-center gap-4">
+          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2" style={{ color: '#16a34a' }}>
             <Bell className="w-5 h-5" />
-            PRONTO PARA RETIRADA
+            RETIRE NO BALCÃO
           </h2>
 
-          {readyOrders.length === 0 && (
-            <p className="text-center py-10 tema-text-secondary">Nenhum pedido pronto</p>
-          )}
-
-          {/* Pedido da vez — destaque hero */}
-          <AnimatePresence mode="wait">
-            {calledOrder && (
-              <CalledOrderCard key={calledOrder.id} order={calledOrder} />
-            )}
-          </AnimatePresence>
-
-          {/* Fila de prontos aguardando retirada */}
-          {queueOrders.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold tracking-widest uppercase text-center tema-text-secondary mb-2">
-                Também prontos
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <AnimatePresence>
-                  {queueOrders.map(order => (
-                    <OrderCard key={order.id} order={order} variant="ready" />
-                  ))}
-                </AnimatePresence>
-              </div>
-            </div>
-          )}
+          <div className="w-full">
+            <AnimatePresence mode="wait">
+              {calledOrder ? (
+                <CalledOrderCard key={calledOrder.id} order={calledOrder} />
+              ) : (
+                <motion.p
+                  key="empty-called"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="text-center py-10 tema-text-secondary text-sm"
+                >
+                  Aguardando pedidos prontos
+                </motion.p>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
+
+        {/* Coluna direita — Prontos para Retirada */}
+        <div className="md:pl-6 pt-4 md:pt-0 flex flex-col">
+          <h2 className="text-xl md:text-2xl font-black mb-4 flex items-center justify-center gap-2" style={{ color: '#16a34a' }}>
+            ✅ PRONTOS PARA RETIRADA
+          </h2>
+
+          {queueOrders.length === 0 && (
+            <p className="text-center py-10 tema-text-secondary text-sm">Nenhum outro pronto</p>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 content-start">
+            <AnimatePresence>
+              {queueOrders.map(order => (
+                <OrderCard key={order.id} order={order} variant="ready" />
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+
       </div>
     </div>
   );
