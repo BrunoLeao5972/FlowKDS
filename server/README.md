@@ -96,6 +96,8 @@ npm install
 - SQL Server: `SQL2014_HOST`, `SQL2014_PORT`, `SQL2014_USER`, `SQL2014_PASSWORD`, `SQL2014_DATABASE`
 - Polling: `SQL2014_POLL_INTERVAL_MS`, `SQL2014_INITIAL_SYNC_AT`
 - Consulta: `SQL2014_QUERY_FILE` (recomendado) ou `SQL2014_QUERY`
+- Detecção leve (opcional): `SQL2014_CHANGE_TOKEN_ENABLED`, `SQL2014_CHANGE_TOKEN_QUERY_FILE` (ou `SQL2014_CHANGE_TOKEN_QUERY`)
+- Economia em ociosidade: `SQL2014_IDLE_POLL_INTERVAL_MS`
 - KDS API: `KDS_API_BASE` + autenticacao (`KDS_AUTH_USERNAME`/`KDS_AUTH_PASSWORD` ou `KDS_AUTH_TOKEN`)
 
 3. Copie o modelo de query e ajuste para seu banco do caixa:
@@ -126,6 +128,16 @@ SQL2014_STATUS_MODE=parity
 
 Com `SQL2014_STATUS_MODE=parity`, codigos impares sao tratados como `cancelled` e codigos pares como `received`.
 Se algum status tiver regra diferente, voce pode sobrescrever com `SQL2014_STATUS_MAP`.
+
+Opcional para reduzir consumo em PCs mais fracos (evita query pesada quando nada mudou):
+
+```env
+SQL2014_CHANGE_TOKEN_ENABLED=true
+SQL2014_CHANGE_TOKEN_QUERY_FILE=./sql2014-change-token-query.sql
+SQL2014_IDLE_POLL_INTERVAL_MS=15000
+```
+
+Quando ativado, o bridge executa primeiro uma query leve de token de mudança. Se o token nao mudar, o ciclo pesado e pulado.
 
 4. Execute o conector:
 

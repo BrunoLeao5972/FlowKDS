@@ -155,6 +155,9 @@ SQL2014_DATABASE=NomeDoBanco
 SQL2014_ENCRYPT=false
 SQL2014_TRUST_CERT=true
 SQL2014_POLL_INTERVAL_MS=3000
+SQL2014_IDLE_POLL_INTERVAL_MS=15000
+SQL2014_CHANGE_TOKEN_ENABLED=true
+SQL2014_CHANGE_TOKEN_QUERY_FILE=./sql2014-change-token-query.sql
 SQL2014_INITIAL_SYNC_AT=2026-03-28T00:00:00.000Z
 SQL2014_START_FROM_NOW=true
 SQL2014_STATE_FILE=.sql2014-bridge-state.json
@@ -167,6 +170,8 @@ KDS_AUTH_PASSWORD=masterkey
 ```
 
 `SQL2014_START_FROM_NOW=true` faz o bridge iniciar pelo horario atual quando o arquivo de estado ainda nao existe, evitando reimportar historico antigo.
+
+`SQL2014_CHANGE_TOKEN_ENABLED=true` ativa uma consulta leve de mudanca antes da consulta pesada. Se nao houver alteracao, o bridge pula o ciclo pesado e reduz consumo de CPU.
 
 ### Trocar apenas o banco consultado
 

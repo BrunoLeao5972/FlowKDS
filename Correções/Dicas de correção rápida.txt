@@ -1,0 +1,62 @@
+No cliente, apague a pasta antiga e copie novamente tudo de release.
+Nao atualize so os .exe, porque dist e scripts tambem impactam.
+
+Validar se os binarios sao da versao nova (data/hora)
+No PowerShell do cliente, rode:
+Get-ChildItem . | Where-Object { $_.Name -in "kds-server.exe","kds-bridge.exe" } | Select-Object Name,Length,LastWriteTime
+As datas devem bater com a release recem-gerada.
+
+Revisar .env do cliente
+Compare o .env do cliente com .env.example.
+Pontos criticos:
+MONGODB_URI
+SQL2014_USER
+SQL2014_PASSWORD
+SQL2014_DATABASE
+SQL2014_QUERY_FILE
+SQL2014_CHANGE_TOKEN_ENABLED
+SQL2014_CHANGE_TOKEN_QUERY_FILE
+SQL2014_IDLE_POLL_INTERVAL_MS
+KDS_API_BASE
+KDS_AUTH_USERNAME
+KDS_AUTH_PASSWORD
+
+Configuracao recomendada para reduzir consumo de CPU no cliente:
+SQL2014_POLL_INTERVAL_MS=3000
+SQL2014_IDLE_POLL_INTERVAL_MS=15000
+SQL2014_CHANGE_TOKEN_ENABLED=true
+SQL2014_CHANGE_TOKEN_QUERY_FILE=./sql2014-change-token-query.sql
+
+Corrigir caminho da query SQL principal no cliente (muito importante)
+Como os .sql ficam em scripts, no .env deixe:
+SQL2014_QUERY_FILE=./sql2014-lançamentos-query.sql
+(se no cliente o arquivo estiver sem acento, use ./sql2014-lancamentos-query.sql)
+
+Arquivo de token de mudanca tambem deve existir em:
+release/scripts/sql2014-change-token-query.sql
+
+Isso funciona porque a bridge resolve caminho relativo a pasta scripts dela.
+
+Reset de estado da bridge (somente troubleshooting)
+Nao fazer isso como rotina.
+Use apenas se a bridge ficar presa/reprocessando incorretamente.
+No cliente, pare tudo e apague:
+release/scripts/.sql2014-bridge-state.json
+release/scripts/.sql2014-bridge.pid
+Depois suba novamente com start-all.
+
+Teste funcional rapido (cenario exato do bug)
+Abra uma mesa com item ja lancado.
+Lance novo item na mesma mesa.
+Verifique se aparece atualizacao no card existente ou novo card corretamente.
+Coletar logs se falhar (para causa raiz).
+
+Rode server e bridge separados (start-server e start-bridge) e capture console.
+Procure por mensagens da bridge com processed/created/updated e possiveis erros de POST /orders.
+
+Conferir a query aplicada no cliente
+Abra sql2014-lançamentos-query.sql (ou sql2014-lancamentos-query.sql, conforme o nome no cliente).
+Confirme que contem os campos:
+externalId, lancamentoId, serviceMode/tipoAtendimento, itemSequence, setor/sectorId, updatedAt.
+
+Se o cliente usa outra query local/custom, a logica pode quebrar mesmo com release correta.

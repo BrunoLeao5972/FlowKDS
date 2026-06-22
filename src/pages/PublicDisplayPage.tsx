@@ -64,7 +64,7 @@ function ThemeLoadingGuard({ children }: React.PropsWithChildren) {
 }
 
 /**
- * Componente de Pedido (card)
+ * Componente de Pedido (card) — fila de "Em preparo" e "Outros prontos"
  */
 interface OrderCardProps {
   order: any;
@@ -80,10 +80,7 @@ function OrderCard({ order, variant }: OrderCardProps) {
       exit={variant === 'preparing' ? { opacity: 0, scale: 0.8 } : { opacity: 0, x: -50 }}
       className={`
         rounded-xl p-4 text-center border-2 transition-all duration-300
-        ${variant === 'preparing' 
-          ? 'tema-card' 
-          : 'tema-ready-card'
-        }
+        ${variant === 'preparing' ? 'tema-card' : 'tema-ready-card'}
       `}
     >
       {getDisplayCustomerName(order.customerName) ? (
@@ -105,6 +102,49 @@ function OrderCard({ order, variant }: OrderCardProps) {
         >
           {getDisplayOrderNumber(order)}
         </span>
+      )}
+    </motion.div>
+  );
+}
+
+/**
+ * Card hero do "Pedido da Vez" — exibido em destaque quando um pedido fica pronto.
+ * A key baseada em order.id garante que a animação reinicia a cada novo chamado.
+ */
+function CalledOrderCard({ order }: { order: any }) {
+  const name = getPanelCustomerName(order.customerName);
+  const hasName = !!getDisplayCustomerName(order.customerName);
+
+  return (
+    <motion.div
+      key={order.id}
+      initial={{ scale: 0.88, opacity: 0 }}
+      animate={{ scale: 1, opacity: 1 }}
+      transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+      className="relative w-full rounded-2xl border-4 border-green-500 bg-green-50 dark:bg-green-950/40 p-6 text-center overflow-hidden"
+    >
+      {/* Anel pulsante de atenção */}
+      <motion.div
+        className="pointer-events-none absolute inset-0 rounded-2xl border-4 border-green-400"
+        animate={{ opacity: [0.3, 0.9, 0.3], scale: [1, 1.025, 1] }}
+        transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+      />
+
+      <p className="text-xs font-bold tracking-widest uppercase text-green-600 dark:text-green-400 mb-3">
+        🔔 Retire seu pedido
+      </p>
+
+      <span
+        className="text-[5rem] md:text-[6.5rem] font-black block leading-none"
+        style={{ color: '#16a34a' }}
+      >
+        {getDisplayOrderNumber(order)}
+      </span>
+
+      {hasName && (
+        <p className="text-xl md:text-2xl mt-3 font-bold text-green-700 dark:text-green-300 break-words">
+          {name}
+        </p>
       )}
     </motion.div>
   );
@@ -186,6 +226,10 @@ function PublicDisplayContent() {
   const readyOrders = orders
     .filter(o => o.status === 'ready' && isDisplayMode(o.serviceMode) && isWithinLastHours(o.createdAt, RECENT_WINDOW_HOURS))
     .sort((a, b) => (b.readyAt?.getTime() || 0) - (a.readyAt?.getTime() || 0));
+
+  // Pedido mais recentemente pronto = "pedido da vez" em destaque
+  const calledOrder = readyOrders[0] ?? null;
+  const queueOrders = readyOrders.slice(1);
 
   // Mantém um único elemento de áudio pré-carregado para reduzir bloqueios e latência.
   useEffect(() => {
@@ -301,20 +345,37 @@ function PublicDisplayContent() {
         </div>
 
         {/* Prontos */}
-        <div className="md:pl-8 pt-0 md:pt-0">
-          <h2 className="text-2xl md:text-3xl font-black mb-4 flex items-center justify-center gap-2" style={{ color: '#16a34a' }}>
+        <div className="md:pl-8 pt-6 md:pt-0 flex flex-col gap-5 overflow-hidden">
+          <h2 className="text-2xl md:text-3xl font-black flex items-center justify-center gap-2" style={{ color: '#16a34a' }}>
             <Bell className="w-5 h-5" />
             PRONTO PARA RETIRADA
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <AnimatePresence>
-              {readyOrders.map(order => (
-                <OrderCard key={order.id} order={order} variant="ready" />
-              ))}
-            </AnimatePresence>
-          </div>
+
           {readyOrders.length === 0 && (
             <p className="text-center py-10 tema-text-secondary">Nenhum pedido pronto</p>
+          )}
+
+          {/* Pedido da vez — destaque hero */}
+          <AnimatePresence mode="wait">
+            {calledOrder && (
+              <CalledOrderCard key={calledOrder.id} order={calledOrder} />
+            )}
+          </AnimatePresence>
+
+          {/* Fila de prontos aguardando retirada */}
+          {queueOrders.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold tracking-widest uppercase text-center tema-text-secondary mb-2">
+                Também prontos
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <AnimatePresence>
+                  {queueOrders.map(order => (
+                    <OrderCard key={order.id} order={order} variant="ready" />
+                  ))}
+                </AnimatePresence>
+              </div>
+            </div>
           )}
         </div>
       </div>

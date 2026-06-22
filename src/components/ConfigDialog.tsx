@@ -18,6 +18,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Plus, Trash2, Pencil } from 'lucide-react';
 import { APP_VERSION } from '@/lib/version';
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 // import ThemeConfigPanel from './ThemeConfigPanel'; // ⭐ Desabilitado: usando apenas dark/light mode
 
 /**
@@ -245,6 +246,8 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const [restaurantNumber, setRestaurantNumber] = useState(settings.restaurantNumber || '');
   const [restaurantCity, setRestaurantCity] = useState(settings.restaurantCity || '');
   const [restaurantComplement, setRestaurantComplement] = useState(settings.restaurantComplement || '');
+  const [cepFetching, setCepFetching] = useState(false);
+  const [cepFetchError, setCepFetchError] = useState('');
 
   // Mensagem de erro de validação exibida na aba Restaurante
   const [restaurantError, setRestaurantError] = useState('');
@@ -336,18 +339,19 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   };
 
   const HelpHint = ({ text, position = 'top' }: { text: string; position?: 'top' | 'left' | 'right' }) => (
-    <span className="relative group inline-flex items-center justify-center w-5 h-5 rounded-full border border-muted-foreground/40 text-[11px] font-bold text-muted-foreground cursor-help select-none" aria-label={text}>
-      ?
-      <span className={`pointer-events-none absolute z-20 hidden group-hover:block group-focus:block w-64 rounded-md bg-zinc-900 text-white text-[11px] leading-snug p-2 shadow-lg ${
-        position === 'left'
-          ? 'right-[125%] top-1/2 -translate-y-1/2'
-          : position === 'right'
-            ? 'left-[125%] top-1/2 -translate-y-1/2'
-            : 'bottom-[120%] right-0'
-      }`}>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-muted-foreground/40 text-[11px] font-bold text-muted-foreground cursor-help select-none" aria-label={text}>
+          ?
+        </span>
+      </TooltipTrigger>
+      <TooltipContent
+        side={position === 'left' ? 'left' : position === 'right' ? 'right' : 'top'}
+        className="max-w-xs text-[11px] leading-snug whitespace-normal"
+      >
         {text}
-      </span>
-    </span>
+      </TooltipContent>
+    </Tooltip>
   );
 
   /**
@@ -814,6 +818,28 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     const digits = value.replace(/\D/g, '').slice(0, 8);
     if (digits.length <= 5) return digits;
     return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
+  };
+
+  const fetchCepData = async (cep: string) => {
+    const digits = cep.replace(/\D/g, '');
+    if (digits.length !== 8) return;
+    setCepFetching(true);
+    setCepFetchError('');
+    try {
+      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+      const data = await res.json() as { erro?: boolean; logradouro?: string; localidade?: string; uf?: string; complemento?: string };
+      if (data.erro) {
+        setCepFetchError('CEP não encontrado. Verifique e preencha o endereço manualmente.');
+      } else {
+        if (data.logradouro) { setRestaurantStreet(data.logradouro); if (missingRestaurantField === 'restaurantStreet') setMissingRestaurantField(null); }
+        if (data.localidade && data.uf) { setRestaurantCity(`${data.localidade}/${data.uf}`); if (missingRestaurantField === 'restaurantCity') setMissingRestaurantField(null); }
+        if (data.complemento) setRestaurantComplement(data.complemento);
+      }
+    } catch {
+      setCepFetchError('Erro ao consultar o CEP. Verifique sua conexão.');
+    } finally {
+      setCepFetching(false);
+    }
   };
 
   /**
@@ -1377,23 +1403,37 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                     ) : null}
                   </div>
 
-                  <div className="md:col-span-2">
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Endereço</label>
-                    <input
-                      id="restaurant-restaurantStreet"
-                      type="text"
-                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantStreet' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
-                      value={restaurantStreet}
-                      onChange={e => {
-                        setRestaurantStreet(e.target.value);
-                        if (restaurantError) setRestaurantError('');
-                        if (missingRestaurantField === 'restaurantStreet') setMissingRestaurantField(null);
-                      }}
-                      placeholder="Rua/Avenida"
-                    />
-                    {missingRestaurantField === 'restaurantStreet' ? (
-                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
-                    ) : null}
+                  {/* CEP — primeiro campo do bloco de endereço, dispara lookup automático */}
+                  <div>
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">CEP</label>
+                    <div className="relative">
+                      <input
+                        id="restaurant-restaurantCep"
+                        type="text"
+                        className={`input w-full h-8 rounded-md text-sm pr-8 ${missingRestaurantField === 'restaurantCep' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
+                        value={restaurantCep}
+                        onChange={e => {
+                          const formatted = formatCep(e.target.value);
+                          setRestaurantCep(formatted);
+                          setCepFetchError('');
+                          if (restaurantError) setRestaurantError('');
+                          if (missingRestaurantField === 'restaurantCep') setMissingRestaurantField(null);
+                          if (formatted.replace(/\D/g, '').length === 8) void fetchCepData(formatted);
+                        }}
+                        placeholder="00000-000"
+                        inputMode="numeric"
+                        maxLength={9}
+                      />
+                      {cepFetching && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground animate-pulse">⏳</span>
+                      )}
+                    </div>
+                    {missingRestaurantField === 'restaurantCep' && (
+                      <p className="mt-1 text-xs font-medium text-red-600">Confira este campo para continuar.</p>
+                    )}
+                    {cepFetchError && (
+                      <p className="mt-1 text-xs font-medium text-amber-600">{cepFetchError}</p>
+                    )}
                   </div>
 
                   <div>
@@ -1414,29 +1454,38 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
                     ) : null}
                   </div>
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">CEP</label>
+
+                  <div className="md:col-span-2">
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">
+                      Endereço
+                      {restaurantStreet && restaurantCep.replace(/\D/g, '').length === 8 && (
+                        <span className="ml-2 text-[10px] font-normal text-green-600">✓ preenchido via CEP</span>
+                      )}
+                    </label>
                     <input
-                      id="restaurant-restaurantCep"
+                      id="restaurant-restaurantStreet"
                       type="text"
-                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantCep' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
-                      value={restaurantCep}
+                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantStreet' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
+                      value={restaurantStreet}
                       onChange={e => {
-                        setRestaurantCep(formatCep(e.target.value));
+                        setRestaurantStreet(e.target.value);
                         if (restaurantError) setRestaurantError('');
-                        if (missingRestaurantField === 'restaurantCep') setMissingRestaurantField(null);
+                        if (missingRestaurantField === 'restaurantStreet') setMissingRestaurantField(null);
                       }}
-                      placeholder="00000-000"
-                      inputMode="numeric"
-                      maxLength={9}
+                      placeholder="Rua/Avenida — preenchido automaticamente pelo CEP"
                     />
-                    {missingRestaurantField === 'restaurantCep' ? (
-                      <p className="mt-1 text-xs font-medium text-red-600">Confira este campo para continuar.</p>
+                    {missingRestaurantField === 'restaurantStreet' ? (
+                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
                     ) : null}
                   </div>
 
                   <div>
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Cidade/UF</label>
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">
+                      Cidade/UF
+                      {restaurantCity && restaurantCep.replace(/\D/g, '').length === 8 && (
+                        <span className="ml-2 text-[10px] font-normal text-green-600">✓ preenchido via CEP</span>
+                      )}
+                    </label>
                     <input
                       id="restaurant-restaurantCity"
                       type="text"
@@ -1447,7 +1496,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                         if (restaurantError) setRestaurantError('');
                         if (missingRestaurantField === 'restaurantCity') setMissingRestaurantField(null);
                       }}
-                      placeholder="Ex: Fortaleza"
+                      placeholder="Ex: Fortaleza/CE"
                     />
                     {missingRestaurantField === 'restaurantCity' ? (
                       <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
@@ -1537,14 +1586,16 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                     <label htmlFor="autoPrep" className="text-sm font-medium cursor-pointer">
                       ⚡ Preparo Automático
                     </label>
-                    <div className="group relative inline-flex">
-                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-muted-foreground/40 text-[11px] font-bold text-muted-foreground cursor-help select-none">
-                        ?
-                      </span>
-                      <span className="pointer-events-none absolute z-20 hidden group-hover:block w-72 rounded-md bg-zinc-900 text-white text-[11px] leading-snug p-2 shadow-lg bottom-[120%] right-0">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full border border-muted-foreground/40 text-[11px] font-bold text-muted-foreground cursor-help select-none">
+                          ?
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs text-[11px] leading-snug whitespace-normal">
                         Quando ativado, novos pedidos automaticamente iniciam o preparo sem necessidade do clique no botão "Iniciar Preparo". O cozinheiro apenas clica em "Produto Pronto" ou "Pedido Pronto" conforme vai finalizando.
-                      </span>
-                    </div>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                   <input
                     id="autoPrep"
@@ -1562,7 +1613,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
           {showPermissionsPanel && (
             <div className="space-y-4">
               <div>
-                <h3 className="font-semibold text-base">Permissões de Acesso</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-base">Permissões de Acesso</h3>
+                  <HelpHint text="Controle quais telas e funcionalidades cada usuário pode acessar. Marque as permissões desejadas e atribua os setores da cozinha a cada usuário." />
+                </div>
                 <p className="text-sm text-muted-foreground">Defina quais telas cada usuário pode acessar e os setores permitidos.</p>
               </div>
               {permError && <p className="text-sm text-red-600">{permError}</p>}
@@ -1573,8 +1627,17 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                   {/* Cabeçalho da tabela */}
                   <div className="grid grid-cols-[1fr_56px_56px_56px_56px_56px] gap-0 bg-muted px-4 py-2 border-b border-border">
                     <span className="text-xs font-semibold text-muted-foreground">Usuário</span>
-                    {(['Admin', 'Cozinha', 'Painel', 'Config.', 'Relatórios'] as const).map(label => (
-                      <span key={label} className="text-xs font-semibold text-muted-foreground text-center">{label}</span>
+                    {([
+                      { label: 'Admin', hint: 'Acesso total ao sistema, incluindo configurações e gerenciamento de usuários.' },
+                      { label: 'Cozinha', hint: 'Permite acessar a tela de produção do KDS para visualizar e gerenciar pedidos.' },
+                      { label: 'Painel', hint: 'Permite acessar o painel público de retirada de pedidos pelos clientes.' },
+                      { label: 'Config.', hint: 'Permite acessar e alterar as configurações do sistema.' },
+                      { label: 'Relatórios', hint: 'Permite visualizar os relatórios operacionais do restaurante.' },
+                    ] as const).map(({ label, hint }) => (
+                      <span key={label} className="text-xs font-semibold text-muted-foreground text-center flex flex-col items-center gap-0.5">
+                        {label}
+                        <HelpHint text={hint} />
+                      </span>
                     ))}
                   </div>
 
@@ -1606,7 +1669,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                         {/* Linha: setores (compacta) */}
                         {sectors.length > 0 && (
                           <div className="flex flex-wrap items-center gap-1.5 pl-0">
-                            <span className="text-[11px] text-muted-foreground font-medium shrink-0">Setores:</span>
+                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground font-medium shrink-0">
+                              Setores:
+                              <HelpHint text="Restringe o usuário a ver apenas pedidos dos setores atribuídos. Sem setores definidos, o usuário vê todos." />
+                            </span>
                             {user.sectorIds.length === 0 ? (
                               <span className="text-[11px] text-muted-foreground italic">nenhum</span>
                             ) : (
@@ -1708,12 +1774,18 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
               {modesSubTab === 'modes' && (
                 <div className="space-y-3">
                   <div>
-                    <h3 className="font-semibold text-base">Modalidades no KDS</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-base">Modalidades no KDS</h3>
+                      <HelpHint text="Filtre quais modalidades do caixa (mesa, delivery, balcão etc.) entram no fluxo do KDS. Pedidos de modalidades não selecionadas são ignorados pela cozinha." />
+                    </div>
                     <p className="text-sm text-muted-foreground">Selecione quais modalidades do caixa podem entrar no fluxo do KDS.</p>
                   </div>
 
                   <div className="rounded-md border border-border bg-background p-3 space-y-2">
-                    <p className="text-xs font-medium">Modalidades habilitadas para atendimento:</p>
+                    <p className="text-xs font-medium flex items-center gap-1.5">
+                      Modalidades habilitadas para atendimento:
+                      <HelpHint text="Apenas pedidos dessas modalidades serão exibidos na cozinha. Se nenhuma for selecionada, todos os pedidos entram." />
+                    </p>
 
                     <div className="flex gap-2">
                       <select
@@ -1764,12 +1836,18 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                   {/* Modalidades habilitadas no Painel de Retirada */}
                   <div className="mt-4 pt-4 border-t border-border space-y-3">
                     <div>
-                      <h3 className="font-semibold text-base">Visualização no painel</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-base">Visualização no painel</h3>
+                        <HelpHint text="Controle quais modalidades aparecem na tela pública de retirada dos clientes. Independente do filtro aplicado na cozinha." />
+                      </div>
                       <p className="text-sm text-muted-foreground">Escolha quais modalidades aparecem na tela de retirada.</p>
                     </div>
 
                     <div className="rounded-md border border-border bg-background p-3 space-y-2">
-                      <p className="text-xs font-medium">Modalidades habilitadas no painel:</p>
+                      <p className="text-xs font-medium flex items-center gap-1.5">
+                        Modalidades habilitadas no painel:
+                        <HelpHint text="Pedidos dessas modalidades serão listados no painel de retirada. Se nenhuma for selecionada, todos os pedidos prontos aparecem." />
+                      </p>
 
                       <div className="flex gap-2">
                         <select
@@ -1825,7 +1903,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="font-semibold text-base">Gerenciar Setores</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-base">Gerenciar Setores</h3>
+                        <HelpHint text="Setores são grupos de produção (ex: Grill, Fritos, Bebidas) importados do SQL Server. Ative apenas os setores que sua cozinha utiliza." />
+                      </div>
                       <p className="text-sm text-muted-foreground">Ative ou desative setores para controlar quais aparecem na cozinha.</p>
                     </div>
                     <button
@@ -1837,7 +1918,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                   </div>
 
                   <div className="rounded-md border border-border bg-background p-3">
-                    <p className="text-xs font-medium mb-2">Setores sincronizados do SQL:</p>
+                    <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
+                      Setores sincronizados do SQL:
+                      <HelpHint text="Lista de setores importados do SQL Server. Desative setores inativos para que não apareçam nas abas da cozinha — os pedidos ainda ficam visíveis na aba Comanda Completa." />
+                    </p>
 
                     {sectors.length === 0 ? (
                       <p className="text-sm text-muted-foreground">Nenhum setor encontrado. Sincronize com o SQL Server.</p>
@@ -2209,7 +2293,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
               {themeSubTab === 'sounds' && (
                 <div className="rounded-md border border-border p-4 bg-muted/10 space-y-4">
                   <div>
-                    <h3 className="font-semibold text-base">Alertas Sonoros</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-base">Alertas Sonoros</h3>
+                      <HelpHint text="Configure alertas sonoros para eventos do KDS. Suporta arquivos mp3 da pasta public/Songs ou caminhos personalizados. Use o botão Testar para ouvir antes de salvar." />
+                    </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       Configure sons em mp3 para novo pedido e pedido pronto. Sons da pasta pública podem ser usados via caminho /Songs/arquivo.mp3.
                     </p>
@@ -2239,7 +2326,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div>
-                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Sons da pasta pública</label>
+                        <label className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-muted-foreground">
+                          Sons da pasta pública
+                          <HelpHint text="Escolha um arquivo de som pré-instalado no servidor. Os arquivos ficam em public/Songs." />
+                        </label>
                         <select
                           className="input w-full h-9 rounded-md text-sm"
                           value={BUILTIN_SONG_OPTIONS.some(option => option.value === newOrderSoundData) ? newOrderSoundData || '' : ''}
@@ -2253,7 +2343,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div>
-                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Caminho personalizado</label>
+                        <label className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-muted-foreground">
+                          Caminho personalizado
+                          <HelpHint text="Digite o caminho do arquivo mp3 no servidor, ex: /Songs/meu-som.mp3. Tem prioridade sobre o som selecionado na pasta pública." />
+                        </label>
                         <input
                           type="text"
                           className="input w-full h-9 rounded-md text-sm"
@@ -2264,7 +2357,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-xs font-semibold text-muted-foreground">Upload mp3:</label>
+                        <label className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                          Upload mp3:
+                          <HelpHint text="Envie um arquivo mp3 do seu computador para ser salvo no servidor e usado como alerta sonoro." />
+                        </label>
                         <input
                           type="file"
                           accept="audio/mpeg,.mp3"
@@ -2305,7 +2401,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div>
-                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Sons da pasta pública</label>
+                        <label className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-muted-foreground">
+                          Sons da pasta pública
+                          <HelpHint text="Escolha um arquivo de som pré-instalado no servidor. Os arquivos ficam em public/Songs." />
+                        </label>
                         <select
                           className="input w-full h-9 rounded-md text-sm"
                           value={BUILTIN_SONG_OPTIONS.some(option => option.value === readyOrderSoundData) ? readyOrderSoundData || '' : ''}
@@ -2319,7 +2418,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div>
-                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Caminho personalizado</label>
+                        <label className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-muted-foreground">
+                          Caminho personalizado
+                          <HelpHint text="Digite o caminho do arquivo mp3 no servidor, ex: /Songs/meu-som.mp3. Tem prioridade sobre o som selecionado na pasta pública." />
+                        </label>
                         <input
                           type="text"
                           className="input w-full h-9 rounded-md text-sm"
@@ -2330,7 +2432,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-xs font-semibold text-muted-foreground">Upload mp3:</label>
+                        <label className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                          Upload mp3:
+                          <HelpHint text="Envie um arquivo mp3 do seu computador para ser salvo no servidor e usado como alerta sonoro." />
+                        </label>
                         <input
                           type="file"
                           accept="audio/mpeg,.mp3"
@@ -2372,7 +2477,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div>
-                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Sons da pasta pública</label>
+                        <label className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-muted-foreground">
+                          Sons da pasta pública
+                          <HelpHint text="Escolha um arquivo de som pré-instalado no servidor. Os arquivos ficam em public/Songs." />
+                        </label>
                         <select
                           className="input w-full h-9 rounded-md text-sm"
                           value={BUILTIN_SONG_OPTIONS.some(option => option.value === panelCallSoundData) ? panelCallSoundData || '' : ''}
@@ -2386,7 +2494,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div>
-                        <label className="block mb-1 text-xs font-semibold text-muted-foreground">Caminho personalizado</label>
+                        <label className="flex items-center gap-1.5 mb-1 text-xs font-semibold text-muted-foreground">
+                          Caminho personalizado
+                          <HelpHint text="Digite o caminho do arquivo mp3 no servidor, ex: /Songs/meu-som.mp3. Tem prioridade sobre o som selecionado na pasta pública." />
+                        </label>
                         <input
                           type="text"
                           className="input w-full h-9 rounded-md text-sm"
@@ -2397,7 +2508,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="text-xs font-semibold text-muted-foreground">Upload mp3:</label>
+                        <label className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
+                          Upload mp3:
+                          <HelpHint text="Envie um arquivo mp3 do seu computador para ser salvo no servidor e usado como alerta sonoro." />
+                        </label>
                         <input
                           type="file"
                           accept="audio/mpeg,.mp3"
@@ -2502,7 +2616,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
           {showUsersPanel && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-base">Gerenciar Usuários</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-base">Gerenciar Usuários</h3>
+                  <HelpHint text="Crie e gerencie os usuários que acessam o KDS. Após criar, configure as permissões de cada um na aba Permissões." />
+                </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="px-2 py-0.5 rounded-full bg-muted border border-border font-medium">{users.length} usuário{users.length !== 1 ? 's' : ''}</span>
                   {users.filter(u => u.permissions.includes('admin')).length > 0 && (
@@ -2516,9 +2633,15 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
               <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4 items-start">
                 {/* Formulário de novo usuário */}
                 <div className="bg-muted/50 p-3 rounded-lg border border-border space-y-2.5">
-                  <h4 className="text-sm font-semibold">Criar novo usuário</h4>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-semibold">Criar novo usuário</h4>
+                    <HelpHint text="Preencha os dados e clique em Adicionar. O usuário poderá fazer login imediatamente. Configure as permissões dele na aba Permissões." />
+                  </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1 text-muted-foreground">Nome de usuário</label>
+                    <label className="flex items-center gap-1.5 text-xs font-medium mb-1 text-muted-foreground">
+                      Nome de usuário
+                      <HelpHint text="Login único para acessar o sistema. Use letras minúsculas sem espaços, ex: gerente ou cozinheiro1." />
+                    </label>
                     <input
                       type="text"
                       className="input w-full h-9 text-sm"
@@ -2528,7 +2651,10 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium mb-1 text-muted-foreground">Senha</label>
+                    <label className="flex items-center gap-1.5 text-xs font-medium mb-1 text-muted-foreground">
+                      Senha
+                      <HelpHint text="Senha de acesso do usuário. Anote em local seguro — não é possível recuperá-la, apenas redefinir pelo Admin." />
+                    </label>
                     <input
                       type="password"
                       className="input w-full h-9 text-sm"

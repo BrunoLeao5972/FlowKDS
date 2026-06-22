@@ -34,10 +34,19 @@ const STATE_FILE = path.resolve(RUNTIME_DIR, process.env.SQL2014_STATE_FILE || '
 const KDS_API_BASE = String(process.env.KDS_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
 const SQL_QUERY_FILE = process.env.SQL2014_QUERY_FILE ? path.resolve(RUNTIME_DIR, process.env.SQL2014_QUERY_FILE) : null;
 const SQL_QUERY = process.env.SQL2014_QUERY || '';
+const SQL_CHANGE_TOKEN_QUERY_FILE = process.env.SQL2014_CHANGE_TOKEN_QUERY_FILE
+  ? path.resolve(RUNTIME_DIR, process.env.SQL2014_CHANGE_TOKEN_QUERY_FILE)
+  : null;
+const SQL_CHANGE_TOKEN_QUERY = process.env.SQL2014_CHANGE_TOKEN_QUERY || '';
+const SQL_CHANGE_TOKEN_ENABLED = toBool(getEnv('SQL2014_CHANGE_TOKEN_ENABLED', 'false'), false);
 const SQL_STATUS_MODE = String(process.env.SQL2014_STATUS_MODE || 'parity').trim().toLowerCase();
 const SQL_START_FROM_NOW = toBool(getEnv('SQL2014_START_FROM_NOW', 'true'), true);
 const SQL_SYNC_OVERLAP_MS = Math.max(0, Number(getEnv('SQL2014_SYNC_OVERLAP_MS', '1000')) || 0);
 const SQL_DISALLOW_HISTORICAL_REPLAY = toBool(getEnv('SQL2014_DISALLOW_HISTORICAL_REPLAY', 'true'), true);
+const SQL_IDLE_POLL_INTERVAL_MS = Math.max(
+  POLL_INTERVAL_MS,
+  Number(getEnv('SQL2014_IDLE_POLL_INTERVAL_MS', String(Math.max(POLL_INTERVAL_MS, 15000)))) || Math.max(POLL_INTERVAL_MS, 15000)
+);
 
 function getInitialLastSyncAt() {
   // Em instalações sem state file, iniciar do "agora" evita reimportar histórico antigo.
@@ -574,6 +583,40 @@ async function buildQueryText() {
   return SQL_QUERY;
 }
 
+async function buildChangeTokenQueryText() {
+  if (SQL_CHANGE_TOKEN_QUERY_FILE) {
+    return fs.readFile(SQL_CHANGE_TOKEN_QUERY_FILE, 'utf8');
+  }
+  return SQL_CHANGE_TOKEN_QUERY;
+}
+
+function extractChangeToken(result) {
+  const rows = Array.isArray(result?.recordset) ? result.recordset : [];
+  if (!rows.length) return null;
+
+  const row = lowerCaseKeys(rows[0]);
+  const firstValue = Object.values(row)[0];
+  const rawValue = row.changetoken ?? row.token ?? row.maxupdatedat ?? row.updatedat ?? firstValue;
+
+  if (rawValue === undefined || rawValue === null) return null;
+  if (rawValue instanceof Date) return rawValue.toISOString();
+
+  const textValue = String(rawValue).trim();
+  return textValue || null;
+}
+
+async function getChangeToken(pool, state, changeTokenQueryText) {
+  if (!SQL_CHANGE_TOKEN_ENABLED || !changeTokenQueryText || !changeTokenQueryText.trim()) {
+    return null;
+  }
+
+  const request = pool.request();
+  request.input('lastSyncAt', sql.DateTime2, new Date(state.lastSyncAt));
+
+  const result = await request.query(changeTokenQueryText);
+  return extractChangeToken(result);
+}
+
 function buildAuthHeaders() {
   const token = getEnv('KDS_AUTH_TOKEN');
   const user = getEnv('KDS_AUTH_USERNAME');
@@ -1057,20 +1100,17 @@ async function validateConfig(queryText) {
   if (!queryText || !queryText.trim()) {
     throw new Error('configure SQL2014_QUERY or SQL2014_QUERY_FILE with a SELECT statement');
   }
+
+  if (SQL_CHANGE_TOKEN_ENABLED && !SQL_CHANGE_TOKEN_QUERY && !SQL_CHANGE_TOKEN_QUERY_FILE) {
+    throw new Error('SQL2014_CHANGE_TOKEN_ENABLED=true requires SQL2014_CHANGE_TOKEN_QUERY or SQL2014_CHANGE_TOKEN_QUERY_FILE');
+  }
 }
 
 async function main() {
   acquireLock();
 
-  const shutdown = () => {
-    releaseLock();
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-  process.on('exit', releaseLock);
-
   const queryText = await buildQueryText();
+  const changeTokenQueryText = await buildChangeTokenQueryText();
   await validateConfig(queryText);
 
   const state = await loadState();
@@ -1079,18 +1119,70 @@ async function main() {
   console.log('[sql2014-bridge] connected to SQL Server');
   console.log(`[sql2014-bridge] using state file: ${STATE_FILE}`);
   console.log(`[sql2014-bridge] polling every ${POLL_INTERVAL_MS} ms`);
+  if (SQL_IDLE_POLL_INTERVAL_MS > POLL_INTERVAL_MS) {
+    console.log(`[sql2014-bridge] idle polling every ${SQL_IDLE_POLL_INTERVAL_MS} ms when no changes are detected`);
+  }
+  if (SQL_CHANGE_TOKEN_ENABLED) {
+    console.log('[sql2014-bridge] lightweight change-token detection is enabled');
+  }
 
   // Sincroniza setores na inicializãção e depois a cada 5 minutos.
   await syncSectors(pool);
   setInterval(() => syncSectors(pool), 5 * 60 * 1000);
 
   let isInitialCycle = true;
+  let lastChangeToken = null;
+  let noChangeStreak = 0;
+  let stopLoop = false;
+
+  const shutdown = () => {
+    stopLoop = true;
+    releaseLock();
+    process.exit(0);
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+  process.on('exit', releaseLock);
 
   const runOnce = async () => {
+    let nextDelayMs = POLL_INTERVAL_MS;
+
     try {
+      if (SQL_CHANGE_TOKEN_ENABLED) {
+        const token = await getChangeToken(pool, state, changeTokenQueryText);
+        if (token && token === lastChangeToken) {
+          noChangeStreak += 1;
+          nextDelayMs = SQL_IDLE_POLL_INTERVAL_MS;
+          if (noChangeStreak === 1 || noChangeStreak % 10 === 0) {
+            console.log(`[sql2014-bridge] no SQL changes detected; skipping heavy sync (streak=${noChangeStreak})`);
+          }
+          isInitialCycle = false;
+          return;
+        }
+
+        if (!token) {
+          console.warn('[sql2014-bridge] change-token query returned empty token; running full sync as fallback');
+        }
+      }
+
       const result = await syncCycle(pool, state, queryText, {
         suppressAutoPrint: isInitialCycle,
       });
+
+      if (SQL_CHANGE_TOKEN_ENABLED) {
+        const tokenAfterSync = await getChangeToken(pool, state, changeTokenQueryText);
+        if (tokenAfterSync) {
+          lastChangeToken = tokenAfterSync;
+        }
+      }
+
+      if (result.processed === 0 && result.created === 0 && result.updated === 0 && result.skipped === 0) {
+        noChangeStreak += 1;
+        nextDelayMs = SQL_IDLE_POLL_INTERVAL_MS;
+      } else {
+        noChangeStreak = 0;
+      }
+
       if (result.processed > 0 || result.skipped > 0) {
         console.log(
           `[sql2014-bridge] processed=${result.processed} created=${result.created} updated=${result.updated} skipped=${result.skipped} lastSyncAt=${result.lastSyncAt}`
@@ -1100,11 +1192,14 @@ async function main() {
     } catch (error) {
       console.error('[sql2014-bridge] cycle failed:', error.message || error);
       isInitialCycle = false;
+    } finally {
+      if (!stopLoop) {
+        setTimeout(runOnce, nextDelayMs);
+      }
     }
   };
 
   await runOnce();
-  setInterval(runOnce, POLL_INTERVAL_MS);
 }
 
 main().catch(error => {
