@@ -1239,7 +1239,15 @@ app.patch('/sectors/:sectorId/activation', authMiddleware, asyncHandler(async (r
 app.use('/orders', authMiddleware);
 
 app.get('/orders', asyncHandler(async (req, res) => {
-  const orders = await Order.find({ tenantId: LEGACY_TENANT_ID }).sort({ createdAt: 1 }).lean();
+  // Traz apenas pedidos de hoje: evita carregar o histórico completo (milhares de
+  // pedidos antigos) no snapshot inicial do KDS.
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const orders = await Order.find({
+    tenantId: LEGACY_TENANT_ID,
+    createdAt: { $gte: startOfToday.getTime() },
+  }).sort({ createdAt: 1 }).lean();
   res.json(orders.map(toISO));
 }));
 

@@ -346,13 +346,13 @@ function PublicDisplayContent() {
         </div>
 
         {/* Coluna central — Pedido da Vez */}
-        <div className="md:px-6 py-4 md:py-0 border-b-2 md:border-b-0 md:border-r-2 tema-border flex flex-col items-center justify-center gap-4">
-          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2" style={{ color: '#16a34a' }}>
+        <div className="md:px-6 py-4 md:py-0 border-b-2 md:border-b-0 md:border-r-2 tema-border flex flex-col items-center">
+          <h2 className="text-xl md:text-2xl font-black mb-4 flex items-center justify-center gap-2" style={{ color: '#16a34a' }}>
             <Bell className="w-5 h-5" />
             RETIRE NO BALCÃO
           </h2>
 
-          <div className="w-full">
+          <div className="w-full flex-1 flex items-center justify-center">
             <AnimatePresence mode="wait">
               {calledOrder ? (
                 <CalledOrderCard key={calledOrder.id} order={calledOrder} />

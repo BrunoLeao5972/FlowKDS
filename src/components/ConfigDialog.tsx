@@ -16,7 +16,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Plus, Trash2, Pencil } from 'lucide-react';
+import { useOrders } from '@/contexts/OrderContext';
+import { Plus, Trash2, Pencil, Printer } from 'lucide-react';
 import { APP_VERSION } from '@/lib/version';
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 // import ThemeConfigPanel from './ThemeConfigPanel'; // ⭐ Desabilitado: usando apenas dark/light mode
@@ -230,7 +231,11 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const settings = useSettings();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const { hasPermission } = useAuth();
+  const { printTestTicket } = useOrders();
   const canViewReports = hasPermission('reports');
+
+  // Estado do botão de página de teste da impressora
+  const [testPrintStatus, setTestPrintStatus] = useState<'idle' | 'sending' | 'ok' | 'skipped' | 'error'>('idle');
 
   // Ref para o input de arquivo de licença (acionado programaticamente pelo botão)
   const licenseInputRef = useRef<HTMLInputElement | null>(null);
@@ -274,6 +279,23 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const setPanelCallEnabled = (v: boolean) => { setPanelCallEnabledLocal(v); settings.setPanelCallSoundEnabled(v); };
   const [printerName, setPrinterName] = useState(settings.printerName || '');
   const [printSize, setPrintSize] = useState<'58mm' | '80mm' | 'A4'>(settings.printSize || '80mm');
+
+  /**
+   * Envia uma senha de teste (número 99) usando o mesmo layout de ticket dos pedidos reais.
+   * Usa os valores de impressora/tamanho ainda não salvos nesta tela, para validar antes de confirmar.
+   */
+  const handleTestPrint = async () => {
+    setTestPrintStatus('sending');
+    try {
+      const result = await printTestTicket(printerName, printSize);
+      setTestPrintStatus(result === 'skipped' ? 'skipped' : 'ok');
+    } catch (error) {
+      console.error('Falha ao imprimir página de teste', error);
+      setTestPrintStatus('error');
+    } finally {
+      setTimeout(() => setTestPrintStatus('idle'), 4000);
+    }
+  };
   const [selectedServiceModes, setSelectedServiceModes] = useState<ServiceMode[]>(
     Array.isArray(enabledServiceModes) && enabledServiceModes.length ? enabledServiceModes : SERVICE_MODE_OPTIONS.map(mode => mode.id)
   );
@@ -1575,8 +1597,28 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                   </select>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Prefixos aceitos no nome da impressora: IMPRESSORA:, HTML: ou FILE:. Sem prefixo, o sistema considera IMPRESSORA e envia direto para o Windows.
+                  Prefixos aceitos no nome da impressora: IMPRESSORA:, HTML:, FILE: ou MEM: (não imprime a comanda quando um pedido é gerado).
                 </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleTestPrint}
+                    disabled={testPrintStatus === 'sending'}
+                    className="inline-flex items-center gap-2 h-9 px-3 rounded-md text-sm font-medium border border-border bg-background hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <Printer className="w-4 h-4" />
+                    {testPrintStatus === 'sending' ? 'Imprimindo...' : 'Imprimir página de teste'}
+                  </button>
+                  {testPrintStatus === 'ok' && (
+                    <span className="text-xs font-medium text-green-600">Teste enviado com sucesso.</span>
+                  )}
+                  {testPrintStatus === 'skipped' && (
+                    <span className="text-xs font-medium text-muted-foreground">Modo MEM ativo: nenhuma comanda é impressa.</span>
+                  )}
+                  {testPrintStatus === 'error' && (
+                    <span className="text-xs font-medium text-red-600">Falha ao enviar teste de impressão.</span>
+                  )}
+                </div>
               </div>
 
               <div className="rounded-md border border-border p-3 bg-muted/20 space-y-3">

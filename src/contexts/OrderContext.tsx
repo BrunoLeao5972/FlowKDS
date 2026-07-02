@@ -17,6 +17,7 @@ interface OrderContextType {
   getAveragePrepTime: () => number;
   printOrderTicket: (order: Order) => Promise<void>;
   reprintOrderTicket: (order: Order) => Promise<void>;
+  printTestTicket: (overridePrinterName?: string, overridePrintSize?: '58mm' | '80mm' | 'A4') => Promise<'sent' | 'skipped'>;
 }
 
 const OrderContext = createContext<OrderContextType | null>(null);
@@ -154,7 +155,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [normalizedEnabledServiceModes]);
 
   // Aceita prefixos no formato MODO:DESTINO para manter compatibilidade com setups
-  // antigos e novos (IMPRESSORA, HTML e FILE).
+  // antigos e novos (IMPRESSORA, HTML, FILE e MEM).
   const resolvePrinterMode = useCallback((rawPrinterName: string) => {
     const input = String(rawPrinterName || '').trim();
     const upper = input.toUpperCase();
@@ -180,6 +181,14 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
+    // MEM: não gera nenhuma comanda física/arquivo — pedido fica só no sistema.
+    if (upper.startsWith('MEM:')) {
+      return {
+        mode: 'MEM' as const,
+        printerName: input.slice(4).trim(),
+      };
+    }
+
     if (input) {
       return {
         mode: 'IMPRESSORA' as const,
@@ -194,7 +203,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Gera HTML local para modo de teste/diagnóstico sem depender do spooler.
-  const buildTicketHtml = useCallback((order: Order, resolvedPrinterName: string) => {
+  const buildTicketHtml = useCallback((order: Order, resolvedPrinterName: string, printSizeOverride?: '58mm' | '80mm' | 'A4') => {
     const createdAt = new Date(order.createdAt);
     const dateText = createdAt.toLocaleString('pt-BR');
     const displayNumber = getTicketDisplayNumber(order);
@@ -204,7 +213,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
       attendant: order.attendant,
       sellerName: order.sellerName,
     });
-    const ticketWidth = settings.printSize === '58mm' ? 220 : settings.printSize === '80mm' ? 300 : 420;
+    const printSize = printSizeOverride ?? settings.printSize;
+    const ticketWidth = printSize === '58mm' ? 220 : printSize === '80mm' ? 300 : 420;
     const tradeName = settings.restaurantTradeName ? String(settings.restaurantTradeName).trim() : '';
     return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -251,6 +261,8 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
 
     const resolved = resolvePrinterMode(settings.printerName || '');
     const mode = resolved.mode;
+    if (mode === 'MEM') return;
+
     if (mode === 'HTML') {
       const popup = window.open('', '_blank', 'noopener,noreferrer,width=420,height=700');
       if (popup) {
@@ -314,8 +326,68 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
     }
   }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printScale, settings.printSize, settings.restaurantTradeName]);
 
+  // Imprime um ticket fictício (senha 99) com o mesmo layout de um pedido real.
+  // Aceita overrides de impressora/tamanho para testar valores ainda não salvos na tela de configuração.
+  const printTestTicket = useCallback(async (overridePrinterName?: string, overridePrintSize?: '58mm' | '80mm' | 'A4') => {
+    const testOrder: Order = {
+      id: 'test-print',
+      number: 99,
+      customerName: 'Teste',
+      serviceMode: 'balcao',
+      items: [
+        { id: 'test-item-1', name: 'Item de Teste', quantity: 2 },
+        { id: 'test-item-2', name: 'Produto de Exemplo', quantity: 1 },
+      ],
+      observations: '',
+      status: 'received',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const resolved = resolvePrinterMode(overridePrinterName ?? settings.printerName ?? '');
+    const printSize = overridePrintSize ?? settings.printSize;
+    const mode = resolved.mode;
+
+    // Reflete o comportamento real: em modo MEM nenhum pedido gera comanda.
+    if (mode === 'MEM') return 'skipped' as const;
+
+    if (mode === 'HTML') {
+      const popup = window.open('', '_blank', 'noopener,noreferrer,width=420,height=700');
+      if (popup) {
+        popup.document.open();
+        popup.document.write(buildTicketHtml(testOrder, resolved.printerName, printSize));
+        popup.document.close();
+        return 'sent' as const;
+      }
+    }
+
+    const resp = await fetch(`${API_BASE}/print/ticket`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({
+        mode,
+        printerName: resolved.printerName,
+        printSize,
+        printScale: settings.printScale,
+        orderNumber: testOrder.number,
+        lancamentoId: null,
+        externalId: null,
+        launchCode: null,
+        customerName: testOrder.customerName,
+        serviceMode: testOrder.serviceMode,
+        attendant: null,
+        sellerName: null,
+        tradeName: settings.restaurantTradeName || '',
+        items: testOrder.items,
+      }),
+    });
+    if (!resp.ok) throw new Error('failed to print test ticket');
+    return 'sent' as const;
+  }, [API_BASE, authHeaders, buildTicketHtml, resolvePrinterMode, settings.printerName, settings.printScale, settings.printSize, settings.restaurantTradeName]);
+
   const reprintOrderTicket = useCallback(async (order: Order) => {
     const resolved = resolvePrinterMode(settings.printerName || '');
+    if (resolved.mode === 'MEM') return;
 
     let orderToPrint: Order = order;
     try {
@@ -740,7 +812,7 @@ export function OrderProvider({ children }: { children: React.ReactNode }) {
   }, [orders, updateStatus]);
 
   return (
-    <OrderContext.Provider value={{ orders, sectors, addOrder, updateStatus, updateItemStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime, printOrderTicket, reprintOrderTicket }}>
+    <OrderContext.Provider value={{ orders, sectors, addOrder, updateStatus, updateItemStatus, cancelOrder, acknowledgeCancelledOrder, getOrdersByStatus, getAveragePrepTime, printOrderTicket, reprintOrderTicket, printTestTicket }}>
       {children}
     </OrderContext.Provider>
   );
