@@ -129,10 +129,6 @@ function CalledOrderCard({ order }: { order: any }) {
         transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
       />
 
-      <p className="text-[10px] font-bold tracking-widest uppercase text-green-600 dark:text-green-400 mb-2">
-        🔔 Retire seu pedido
-      </p>
-
       <span
         className="text-[2.8rem] md:text-[3.8rem] font-black block leading-none"
         style={{ color: '#16a34a' }}

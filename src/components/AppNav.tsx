@@ -40,13 +40,7 @@ export function AppNav() {
     setCustomStartNumber,
     touchResetDate,
     setRestaurantTradeName,
-    setRestaurantLegalName,
     setRestaurantCnpj,
-    setRestaurantCep,
-    setRestaurantStreet,
-    setRestaurantNumber,
-    setRestaurantCity,
-    setRestaurantComplement,
     setLicenseFileName,
     setLicenseContent,
     setNewOrderSound,
@@ -80,13 +74,7 @@ export function AppNav() {
     tempoAlerta: number;
     tempoCritico: number;
     tradeName: string;
-    legalName: string;
     cnpj: string;
-    cep: string;
-    street: string;
-    number: string;
-    city: string;
-    complement: string;
     orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
     customStartNumber: number;
     lastResetDate: string | null;
@@ -196,13 +184,7 @@ export function AppNav() {
             orderMode,
             startNumber,
             restaurantTradeName,
-            restaurantLegalName,
             restaurantCnpj,
-            restaurantCep,
-            restaurantStreet,
-            restaurantNumber,
-            restaurantCity,
-            restaurantComplement,
             licenseFileName,
             licenseContent,
             newOrderSound,
@@ -225,25 +207,13 @@ export function AppNav() {
             setOrderNumberMode(orderMode);
             setCustomStartNumber(startNumber);
             setRestaurantTradeName(restaurantTradeName);
-            setRestaurantLegalName(restaurantLegalName);
             setRestaurantCnpj(restaurantCnpj);
-            setRestaurantCep(restaurantCep);
-            setRestaurantStreet(restaurantStreet);
-            setRestaurantNumber(restaurantNumber);
-            setRestaurantCity(restaurantCity);
-            setRestaurantComplement(restaurantComplement);
             void saveRestaurantSettings({
               tempoMedio: medio,
               tempoAlerta: alerta,
               tempoCritico: critico,
               tradeName: restaurantTradeName,
-              legalName: restaurantLegalName,
               cnpj: restaurantCnpj,
-              cep: restaurantCep,
-              street: restaurantStreet,
-              number: restaurantNumber,
-              city: restaurantCity,
-              complement: restaurantComplement,
               orderNumberMode: orderMode,
               customStartNumber: startNumber,
               lastResetDate: (orderMode === 'daily-reset' || orderMode === 'custom-start')

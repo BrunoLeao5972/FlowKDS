@@ -3,7 +3,7 @@
  *
  * Modal central de configurações do sistema KDS.
  * Contém abas para:
- *   - Restaurante: dados cadastrais (nome fantasia, razão social, CNPJ, endereço detalhado) e licença.
+ *   - Restaurante: dados cadastrais (nome do estabelecimento, CNPJ) e licença.
  *   - Timer: tempos de preparo, alerta e crítico para coloração dos cards da cozinha.
  *   - Usuários: criação e remoção de usuários do sistema.
  *   - Permissões: controle de acesso por tela para cada usuário.
@@ -39,13 +39,7 @@ interface ConfigDialogProps {
     orderMode: 'continuous' | 'daily-reset' | 'custom-start',
     startNumber: number,
     restaurantTradeName: string,
-    restaurantLegalName: string,
     restaurantCnpj: string,
-    restaurantCep: string,
-    restaurantStreet: string,
-    restaurantNumber: string,
-    restaurantCity: string,
-    restaurantComplement: string,
     licenseFileName: string | null,
     licenseContent: string | null,
     newOrderSound: string | null,
@@ -102,12 +96,7 @@ interface SectorData {
 
 type RequiredRestaurantField =
   | 'restaurantTradeName'
-  | 'restaurantLegalName'
-  | 'restaurantCnpj'
-  | 'restaurantStreet'
-  | 'restaurantNumber'
-  | 'restaurantCity'
-  | 'restaurantCep';
+  | 'restaurantCnpj';
 
 const BUILTIN_SONG_OPTIONS = [
   {
@@ -242,17 +231,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
 
   // Dados cadastrais do restaurante — inicializados com os valores já salvos no contexto
   const [restaurantTradeName, setRestaurantTradeName] = useState(settings.restaurantTradeName || '');
-  const [restaurantLegalName, setRestaurantLegalName] = useState(settings.restaurantLegalName || '');
   const [restaurantCnpj, setRestaurantCnpj] = useState(settings.restaurantCnpj || '');
-
-  // Campos de endereço detalhado
-  const [restaurantCep, setRestaurantCep] = useState(settings.restaurantCep || '');
-  const [restaurantStreet, setRestaurantStreet] = useState(settings.restaurantStreet || '');
-  const [restaurantNumber, setRestaurantNumber] = useState(settings.restaurantNumber || '');
-  const [restaurantCity, setRestaurantCity] = useState(settings.restaurantCity || '');
-  const [restaurantComplement, setRestaurantComplement] = useState(settings.restaurantComplement || '');
-  const [cepFetching, setCepFetching] = useState(false);
-  const [cepFetchError, setCepFetchError] = useState('');
 
   // Mensagem de erro de validação exibida na aba Restaurante
   const [restaurantError, setRestaurantError] = useState('');
@@ -278,7 +257,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const setPanelCallSoundData = (v: string | null) => { setPanelCallSoundDataLocal(v); settings.setPanelCallSound(v); };
   const setPanelCallEnabled = (v: boolean) => { setPanelCallEnabledLocal(v); settings.setPanelCallSoundEnabled(v); };
   const [printerName, setPrinterName] = useState(settings.printerName || '');
-  const [printSize, setPrintSize] = useState<'58mm' | '80mm' | 'A4'>(settings.printSize || '80mm');
 
   /**
    * Envia uma senha de teste (número 99) usando o mesmo layout de ticket dos pedidos reais.
@@ -287,7 +265,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
   const handleTestPrint = async () => {
     setTestPrintStatus('sending');
     try {
-      const result = await printTestTicket(printerName, printSize);
+      const result = await printTestTicket(printerName, '80mm');
       setTestPrintStatus(result === 'skipped' ? 'skipped' : 'ok');
     } catch (error) {
       console.error('Falha ao imprimir página de teste', error);
@@ -588,7 +566,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     const rows = getReportSummaryRows();
     const cooks = reportData.teamProductivity?.byCook || [];
     const rangeText = `${reportFromDate || 'início'} ${reportFromTime || ''} até ${reportToDate || 'agora'} ${reportToTime || ''}`.trim();
-    const restaurantName = (restaurantTradeName || settings.restaurantTradeName || restaurantLegalName || 'Restaurante').trim();
+    const restaurantName = (restaurantTradeName || settings.restaurantTradeName || 'Restaurante').trim();
 
     const escapeHtml = (value: string) => String(value || '')
       .replace(/&/g, '&amp;')
@@ -830,38 +808,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
     if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
     if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
     return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
-  };
-
-  /**
-   * Aplica a máscara de CEP em tempo real: 00000-000.
-   * Limita a entrada a 8 dígitos numéricos.
-   */
-  const formatCep = (value: string) => {
-    const digits = value.replace(/\D/g, '').slice(0, 8);
-    if (digits.length <= 5) return digits;
-    return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
-  };
-
-  const fetchCepData = async (cep: string) => {
-    const digits = cep.replace(/\D/g, '');
-    if (digits.length !== 8) return;
-    setCepFetching(true);
-    setCepFetchError('');
-    try {
-      const res = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
-      const data = await res.json() as { erro?: boolean; logradouro?: string; localidade?: string; uf?: string; complemento?: string };
-      if (data.erro) {
-        setCepFetchError('CEP não encontrado. Verifique e preencha o endereço manualmente.');
-      } else {
-        if (data.logradouro) { setRestaurantStreet(data.logradouro); if (missingRestaurantField === 'restaurantStreet') setMissingRestaurantField(null); }
-        if (data.localidade && data.uf) { setRestaurantCity(`${data.localidade}/${data.uf}`); if (missingRestaurantField === 'restaurantCity') setMissingRestaurantField(null); }
-        if (data.complemento) setRestaurantComplement(data.complemento);
-      }
-    } catch {
-      setCepFetchError('Erro ao consultar o CEP. Verifique sua conexão.');
-    } finally {
-      setCepFetching(false);
-    }
   };
 
   /**
@@ -1151,22 +1097,16 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
    *
    * Regras:
    *   - CNPJ deve ter exatamente 14 dígitos.
-   *   - CEP, se preenchido, deve ter exatamente 8 dígitos.
    *
    * Em caso de erro, redireciona para a aba Restaurante e exibe a mensagem inline.
    * Se a validação passar, chama onSave com todos os valores atuais do formulário.
    */
   const handleSave = () => {
     const cnpjDigits = restaurantCnpj.replace(/\D/g, '');
-    const cepDigits = restaurantCep.replace(/\D/g, '');
 
     const requiredFields = [
-      { key: 'restaurantTradeName', label: 'Nome fantasia', value: restaurantTradeName },
-      { key: 'restaurantLegalName', label: 'Razão social', value: restaurantLegalName },
+      { key: 'restaurantTradeName', label: 'Nome do Estabelecimento', value: restaurantTradeName },
       { key: 'restaurantCnpj', label: 'CNPJ', value: restaurantCnpj },
-      { key: 'restaurantStreet', label: 'Endereço', value: restaurantStreet },
-      { key: 'restaurantNumber', label: 'Número', value: restaurantNumber },
-      { key: 'restaurantCity', label: 'Cidade/UF', value: restaurantCity },
     ];
 
     const missingField = requiredFields.find(field => !String(field.value || '').trim());
@@ -1200,19 +1140,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       return;
     }
 
-    if (restaurantCep.trim().length > 0 && cepDigits.length !== 8) {
-      setRestaurantError('CEP inválido. Use o formato 00000-000.');
-      setMissingRestaurantField('restaurantCep');
-      setActiveTab('restaurant');
-      setShowUsersPanel(false);
-      setShowPermissionsPanel(false);
-      setShowServiceModesPanel(false);
-      setShowReportsPanel(false);
-      setShowSupportPanel(false);
-      // setShowThemePanel(false); // ⭐ Disabled
-      return;
-    }
-
     if (selectedServiceModes.length === 0) {
       setRestaurantError('Selecione pelo menos uma modalidade para usar no KDS.');
       setMissingRestaurantField(null);
@@ -1234,13 +1161,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       orderMode,
       startNumber,
       restaurantTradeName,
-      restaurantLegalName,
       formatCnpj(restaurantCnpj),
-      formatCep(restaurantCep),
-      restaurantStreet,
-      restaurantNumber,
-      restaurantCity,
-      restaurantComplement,
       licenseFileName,
       licenseContent,
       newOrderSoundData,
@@ -1248,7 +1169,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
       newOrderEnabled,
       readyEnabled,
       printerName.trim(),
-      printSize,
+      '80mm',
       115,
       selectedServiceModes,
       selectedPanelServiceModes,
@@ -1368,7 +1289,7 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
               <div className="rounded-md border border-border bg-muted/10 p-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-3 gap-y-2.5">
                   <div className="md:col-span-1">
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Nome fantasia</label>
+                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Nome do Estabelecimento</label>
                     <input
                       id="restaurant-restaurantTradeName"
                       type="text"
@@ -1404,135 +1325,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                     {missingRestaurantField === 'restaurantCnpj' ? (
                       <p className="mt-1 text-xs font-medium text-red-600">Confira este campo para continuar.</p>
                     ) : null}
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Razão social</label>
-                    <input
-                      id="restaurant-restaurantLegalName"
-                      type="text"
-                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantLegalName' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
-                      value={restaurantLegalName}
-                      onChange={e => {
-                        setRestaurantLegalName(e.target.value);
-                        if (restaurantError) setRestaurantError('');
-                        if (missingRestaurantField === 'restaurantLegalName') setMissingRestaurantField(null);
-                      }}
-                      placeholder="Ex: Restaurante Durangos Burger LTDA"
-                    />
-                    {missingRestaurantField === 'restaurantLegalName' ? (
-                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
-                    ) : null}
-                  </div>
-
-                  {/* CEP — primeiro campo do bloco de endereço, dispara lookup automático */}
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">CEP</label>
-                    <div className="relative">
-                      <input
-                        id="restaurant-restaurantCep"
-                        type="text"
-                        className={`input w-full h-8 rounded-md text-sm pr-8 ${missingRestaurantField === 'restaurantCep' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
-                        value={restaurantCep}
-                        onChange={e => {
-                          const formatted = formatCep(e.target.value);
-                          setRestaurantCep(formatted);
-                          setCepFetchError('');
-                          if (restaurantError) setRestaurantError('');
-                          if (missingRestaurantField === 'restaurantCep') setMissingRestaurantField(null);
-                          if (formatted.replace(/\D/g, '').length === 8) void fetchCepData(formatted);
-                        }}
-                        placeholder="00000-000"
-                        inputMode="numeric"
-                        maxLength={9}
-                      />
-                      {cepFetching && (
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground animate-pulse">⏳</span>
-                      )}
-                    </div>
-                    {missingRestaurantField === 'restaurantCep' && (
-                      <p className="mt-1 text-xs font-medium text-red-600">Confira este campo para continuar.</p>
-                    )}
-                    {cepFetchError && (
-                      <p className="mt-1 text-xs font-medium text-amber-600">{cepFetchError}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Número</label>
-                    <input
-                      id="restaurant-restaurantNumber"
-                      type="text"
-                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantNumber' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
-                      value={restaurantNumber}
-                      onChange={e => {
-                        setRestaurantNumber(e.target.value);
-                        if (restaurantError) setRestaurantError('');
-                        if (missingRestaurantField === 'restaurantNumber') setMissingRestaurantField(null);
-                      }}
-                      placeholder="Ex: 120"
-                    />
-                    {missingRestaurantField === 'restaurantNumber' ? (
-                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
-                    ) : null}
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">
-                      Endereço
-                      {restaurantStreet && restaurantCep.replace(/\D/g, '').length === 8 && (
-                        <span className="ml-2 text-[10px] font-normal text-green-600">✓ preenchido via CEP</span>
-                      )}
-                    </label>
-                    <input
-                      id="restaurant-restaurantStreet"
-                      type="text"
-                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantStreet' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
-                      value={restaurantStreet}
-                      onChange={e => {
-                        setRestaurantStreet(e.target.value);
-                        if (restaurantError) setRestaurantError('');
-                        if (missingRestaurantField === 'restaurantStreet') setMissingRestaurantField(null);
-                      }}
-                      placeholder="Rua/Avenida — preenchido automaticamente pelo CEP"
-                    />
-                    {missingRestaurantField === 'restaurantStreet' ? (
-                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">
-                      Cidade/UF
-                      {restaurantCity && restaurantCep.replace(/\D/g, '').length === 8 && (
-                        <span className="ml-2 text-[10px] font-normal text-green-600">✓ preenchido via CEP</span>
-                      )}
-                    </label>
-                    <input
-                      id="restaurant-restaurantCity"
-                      type="text"
-                      className={`input w-full h-8 rounded-md text-sm ${missingRestaurantField === 'restaurantCity' ? 'border-red-500 ring-2 ring-red-200 focus:ring-red-300' : ''}`}
-                      value={restaurantCity}
-                      onChange={e => {
-                        setRestaurantCity(e.target.value);
-                        if (restaurantError) setRestaurantError('');
-                        if (missingRestaurantField === 'restaurantCity') setMissingRestaurantField(null);
-                      }}
-                      placeholder="Ex: Fortaleza/CE"
-                    />
-                    {missingRestaurantField === 'restaurantCity' ? (
-                      <p className="mt-1 text-xs font-medium text-red-600">Preencha este campo para continuar.</p>
-                    ) : null}
-                  </div>
-                  <div>
-                    <label className="block mb-1 text-xs font-semibold text-muted-foreground">Complemento</label>
-                    <input
-                      type="text"
-                      className="input w-full h-8 rounded-md text-sm"
-                      value={restaurantComplement}
-                      onChange={e => setRestaurantComplement(e.target.value)}
-                      placeholder="Ex: Sala 02, Fundos"
-                    />
                   </div>
                 </div>
               </div>
@@ -1583,18 +1375,6 @@ export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, pa
                     onChange={e => setPrinterName(e.target.value)}
                     placeholder="Ex: Epson TM-T20"
                   />
-                </div>
-                <div>
-                  <label className="block mb-1.5 text-sm font-medium">Tamanho da impressao:</label>
-                  <select
-                    className="input w-full h-9 rounded-md text-sm"
-                    value={printSize}
-                    onChange={e => setPrintSize(e.target.value as '58mm' | '80mm' | 'A4')}
-                  >
-                    <option value="58mm">58mm</option>
-                    <option value="80mm">80mm</option>
-                    <option value="A4">A4</option>
-                  </select>
                 </div>
                 <p className="text-xs text-muted-foreground">
                   Prefixos aceitos no nome da impressora: IMPRESSORA:, HTML:, FILE: ou MEM: (não imprime a comanda quando um pedido é gerado).
