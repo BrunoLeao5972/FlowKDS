@@ -1071,6 +1071,32 @@ async function syncCycle(pool, state, queryText, options = {}) {
   };
 }
 
+// Índices que aceleram o filtro incremental (COALESCE ... > @lastSyncAt) das queries do bridge.
+// Idempotente: seguro rodar em toda inicialização, em qualquer instalação de cliente.
+const PERFORMANCE_INDEXES = [
+  { name: 'IX_Lançamentos_DataDeEdição', table: 'dbo.Lançamentos', column: '[DataDeEdição]' },
+  { name: 'IX_Pedidos_Produtos_DataDeEdição', table: 'dbo.Pedidos_Produtos', column: '[DataDeEdição]' },
+];
+
+async function ensurePerformanceIndexes(pool) {
+  for (const idx of PERFORMANCE_INDEXES) {
+    try {
+      await pool.request().query(`
+        IF NOT EXISTS (
+          SELECT 1 FROM sys.indexes WHERE name = '${idx.name}'
+          AND object_id = OBJECT_ID('${idx.table}')
+        )
+        CREATE NONCLUSTERED INDEX [${idx.name}]
+        ON ${idx.table} (${idx.column});
+      `);
+      console.log(`[sql2014-bridge] índice de performance ok: ${idx.name}`);
+    } catch (err) {
+      // Não bloqueia a sincronização de pedidos por falta de permissão de DDL no cliente.
+      console.warn(`[sql2014-bridge] não foi possível criar índice ${idx.name}:`, err.message || err);
+    }
+  }
+}
+
 async function syncSectors(pool) {
   try {
     const result = await pool.request().query('SELECT [C\u00f3digo], [Descri\u00e7\u00e3o] FROM Setores ORDER BY [C\u00f3digo]');
@@ -1125,6 +1151,9 @@ async function main() {
   if (SQL_CHANGE_TOKEN_ENABLED) {
     console.log('[sql2014-bridge] lightweight change-token detection is enabled');
   }
+
+  // Garante os índices de performance no banco do cliente (idempotente, roda em toda inicialização).
+  await ensurePerformanceIndexes(pool);
 
   // Sincroniza setores na inicializãção e depois a cada 5 minutos.
   await syncSectors(pool);
