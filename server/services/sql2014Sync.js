@@ -1,37 +1,23 @@
 const fs = require('fs/promises');
-const fsSync = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
 const sql = require('mssql');
 
-const RUNTIME_DIR = process.pkg ? path.join(path.dirname(process.execPath), 'scripts') : __dirname;
-const ENV_PATH = process.pkg ? path.join(path.dirname(process.execPath), '.env') : path.join(__dirname, '..', '.env');
-require('dotenv').config({ path: ENV_PATH });
-
-const PID_FILE = path.resolve(RUNTIME_DIR, '.sql2014-bridge.pid');
-
-function acquireLock() {
-  if (fsSync.existsSync(PID_FILE)) {
-    const existingPid = Number(fsSync.readFileSync(PID_FILE, 'utf8').trim());
-    try {
-      process.kill(existingPid, 0);
-      console.error(`[sql2014-bridge] outra instância já está rodando (PID ${existingPid}). Encerrando.`);
-      process.exit(1);
-    } catch {
-      // processo não existe mais, arquivo PID está obsoleto
-    }
-  }
-  fsSync.writeFileSync(PID_FILE, String(process.pid), 'utf8');
-}
-
-function releaseLock() {
-  try { fsSync.unlinkSync(PID_FILE); } catch { /* ignorar */ }
-}
+// Resolve relativo a server/scripts/ (onde ficam os .sql e o state file), tanto em dev
+// quanto empacotado — este módulo vive em server/services/, mas os arquivos configurados
+// em .env (ex.: SQL2014_QUERY_FILE=./sql2014-lançamentos-query.sql) continuam relativos
+// à pasta scripts/ para não quebrar instalações de cliente já configuradas.
+const RUNTIME_DIR = process.pkg
+  ? path.join(path.dirname(process.execPath), 'scripts')
+  : path.join(__dirname, '..', 'scripts');
 
 const POLL_INTERVAL_MS = Number(process.env.SQL2014_POLL_INTERVAL_MS || 3000);
 const STATE_FILE = path.resolve(RUNTIME_DIR, process.env.SQL2014_STATE_FILE || '.sql2014-bridge-state.json');
-const KDS_API_BASE = String(process.env.KDS_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
+// Sobrescrito em startSql2014Sync() com base na porta real do servidor, a menos que
+// KDS_API_BASE esteja explicitamente configurado — evita ter que manter esse valor em
+// sincronia manual com PORT agora que os dois vivem no mesmo processo.
+let KDS_API_BASE = String(process.env.KDS_API_BASE || 'http://127.0.0.1:8081').replace(/\/$/, '');
 const SQL_QUERY_FILE = process.env.SQL2014_QUERY_FILE ? path.resolve(RUNTIME_DIR, process.env.SQL2014_QUERY_FILE) : null;
 const SQL_QUERY = process.env.SQL2014_QUERY || '';
 const SQL_CHANGE_TOKEN_QUERY_FILE = process.env.SQL2014_CHANGE_TOKEN_QUERY_FILE
@@ -40,25 +26,56 @@ const SQL_CHANGE_TOKEN_QUERY_FILE = process.env.SQL2014_CHANGE_TOKEN_QUERY_FILE
 const SQL_CHANGE_TOKEN_QUERY = process.env.SQL2014_CHANGE_TOKEN_QUERY || '';
 const SQL_CHANGE_TOKEN_ENABLED = toBool(getEnv('SQL2014_CHANGE_TOKEN_ENABLED', 'false'), false);
 const SQL_STATUS_MODE = String(process.env.SQL2014_STATUS_MODE || 'parity').trim().toLowerCase();
-const SQL_START_FROM_NOW = toBool(getEnv('SQL2014_START_FROM_NOW', 'true'), true);
 const SQL_SYNC_OVERLAP_MS = Math.max(0, Number(getEnv('SQL2014_SYNC_OVERLAP_MS', '1000')) || 0);
 const SQL_DISALLOW_HISTORICAL_REPLAY = toBool(getEnv('SQL2014_DISALLOW_HISTORICAL_REPLAY', 'true'), true);
+// Antes da query de change-token virar sargable (ver sql2014-change-token-query.sql), esse
+// piso ficava em 15s pra evitar bater com frequencia numa consulta cara (Clustered Index Scan).
+// Agora que ela usa Index Seek, o custo por poll e desprezivel, entao o padrao acompanha o
+// POLL_INTERVAL_MS normal — sem isso, um pedido novo podia demorar ate ~15s pra aparecer no KDS.
 const SQL_IDLE_POLL_INTERVAL_MS = Math.max(
   POLL_INTERVAL_MS,
-  Number(getEnv('SQL2014_IDLE_POLL_INTERVAL_MS', String(Math.max(POLL_INTERVAL_MS, 15000)))) || Math.max(POLL_INTERVAL_MS, 15000)
+  Number(getEnv('SQL2014_IDLE_POLL_INTERVAL_MS', String(POLL_INTERVAL_MS))) || POLL_INTERVAL_MS
 );
 
-function getInitialLastSyncAt() {
-  // Em instalações sem state file, iniciar do "agora" evita reimportar histórico antigo.
-  if (SQL_START_FROM_NOW) {
-    return new Date().toISOString();
+// Códigos de Produtos.Tipo (expostos pela query como productType) que NÃO devem virar item no
+// KDS — ex.: Serviço, Taxa de Serviço, Taxa de Entrega, Fabricação, Grade, etc. Os códigos
+// variam por instalação (confira com a query abaixo antes de configurar):
+//   SELECT Tipo, COUNT(*) AS Qtde, MIN(Descrição) AS ExemploNome FROM Produtos GROUP BY Tipo;
+const SQL_EXCLUDED_PRODUCT_TYPES = new Set(
+  String(getEnv('SQL2014_EXCLUDED_PRODUCT_TYPES', ''))
+    .split(',')
+    .map(v => v.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+async function fetchServerNow(pool) {
+  const result = await pool.request().query('SELECT GETDATE() AS now');
+  const row = lowerCaseKeys(result?.recordset?.[0] || {});
+  return parseUpdatedAt(row.now) || new Date();
+}
+
+async function getInitialLastSyncAt(pool) {
+  // SQL2014_INITIAL_SYNC_AT é a única forma de pedir explicitamente uma importação de
+  // histórico (ex.: reprocessar pedidos desde uma data específica). Sem essa variável
+  // configurada, o cursor inicial SEMPRE vem da hora atual do próprio SQL Server
+  // (GETDATE()), nunca do relógio da máquina onde o servidor roda: as colunas
+  // Edição/Inclusão/Emissão são gravadas pelo SQL Server, então só a hora dele garante
+  // que o cursor bata com esses valores — o fuso horário/relógio do Windows local pode
+  // estar divergente (ou em UTC) e já causou pedidos novos ficando de fora, além de já
+  // ter causado importação de histórico inteiro travando a máquina do cliente.
+  const configured = String(process.env.SQL2014_INITIAL_SYNC_AT || '').trim();
+  if (configured) {
+    const parsed = new Date(configured);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
   }
 
-  const configured = String(process.env.SQL2014_INITIAL_SYNC_AT || '').trim();
-  if (!configured) return '1970-01-01T00:00:00.000Z';
-  const parsed = new Date(configured);
-  if (Number.isNaN(parsed.getTime())) return '1970-01-01T00:00:00.000Z';
-  return parsed.toISOString();
+  try {
+    const serverNow = await fetchServerNow(pool);
+    return serverNow.toISOString();
+  } catch (error) {
+    console.warn(`[sql2014-sync] falha ao obter hora do SQL Server, usando relógio local: ${error.message || error}`);
+    return new Date().toISOString();
+  }
 }
 
 function isPermanentOrderError(message) {
@@ -106,10 +123,19 @@ const sqlConfig = {
   user: getEnv('SQL2014_USER'),
   password: getEnv('SQL2014_PASSWORD'),
   database: getEnv('SQL2014_DATABASE'),
+  requestTimeout: Number(getEnv('SQL2014_REQUEST_TIMEOUT_MS', '30000')),
+  connectionTimeout: Number(getEnv('SQL2014_CONNECTION_TIMEOUT_MS', '30000')),
   options: {
     encrypt: toBool(getEnv('SQL2014_ENCRYPT', 'false')),
     trustServerCertificate: toBool(getEnv('SQL2014_TRUST_CERT', 'true')),
     enableArithAbort: true,
+    // As colunas Edição/Inclusão/Emissão do SQL2014 são DATETIME2 "naive" (hora local do
+    // cliente, sem timezone). Com useUTC=true (padrão do driver), o mssql envia/lê esses
+    // valores usando os getters UTC do JS Date, deslocando o cursor de sincronização pelo
+    // fuso horário local (ex.: 3h no Brasil) e bloqueando pedidos novos até o relógio local
+    // alcançar aquele horário "no futuro". useUTC=false alinha o driver ao mesmo referencial
+    // de hora local usado pelo banco do cliente.
+    useUTC: toBool(getEnv('SQL2014_USE_UTC', 'false'), false),
   },
   pool: {
     max: Number(getEnv('SQL2014_POOL_MAX', '10')),
@@ -149,6 +175,18 @@ function normalizeStatus(rawStatus) {
   };
 
   return map[status] || 'received';
+}
+
+function stripCombiningMarks(str) {
+  // Remove marcas de combinação Unicode (acentos decompostos via NFD), no intervalo
+  // U+0300-U+036F. Evita literal de regex com esse range (alguns pipelines de texto
+  // acabam normalizando o escape de volta para os próprios caracteres de combinação).
+  return Array.from(String(str || ''))
+    .filter(ch => {
+      const code = ch.codePointAt(0);
+      return code < 0x300 || code > 0x36f;
+    })
+    .join('');
 }
 
 function lowerCaseKeys(row) {
@@ -260,9 +298,7 @@ function parseItemFromFlatRow(row) {
   const itemSequence = itemSequenceRaw != null ? String(itemSequenceRaw).trim() : '';
   const productIdRaw = row.produtoid ?? row.productid ?? row.codigo ?? row.code;
   const productId = productIdRaw != null ? String(productIdRaw).trim() : '';
-  const normalizedNameToken = String(name)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+  const normalizedNameToken = stripCombiningMarks(String(name).normalize('NFD'))
     .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 32);
@@ -374,9 +410,7 @@ function parseServiceModeFromRow(row) {
     return numericModeMap[raw];
   }
 
-  const normalized = raw
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+  const normalized = stripCombiningMarks(raw.normalize('NFD'));
 
   const aliasMap = {
     balcao: 'balcao',
@@ -407,6 +441,15 @@ function groupRowsToOrders(rows) {
 
     const updatedAt = parseUpdatedAt(row.updatedat);
     if (!updatedAt) continue;
+
+    // Itens de tipo não-cozinha (serviço, taxa, fabricação, grade, etc. — configurável via
+    // SQL2014_EXCLUDED_PRODUCT_TYPES) não devem virar card/ficar contabilizados no KDS. Pulado
+    // antes de qualquer acúmulo no pedido para não afetar status/contagem de itens ativos.
+    const productType = String(row.producttype || '').trim().toLowerCase();
+    if (productType && SQL_EXCLUDED_PRODUCT_TYPES.has(productType)) {
+      console.log(`[sql2014-sync] item ignorado por tipo de produto excluído: externalId=${launchCode} item=${row.itemname || row.produtodescricao || '?'} productType=${productType}`);
+      continue;
+    }
 
     if (!grouped.has(launchCode)) {
       grouped.set(launchCode, {
@@ -468,13 +511,13 @@ function groupRowsToOrders(rows) {
       current.hasDeliveredItems = true;
       if (!shouldKeepDeliveredPrincipalItem) {
         // Fora de balcao/mesa/cartao/delivery/encomenda/apartamento, mantém comportamento legado de não reenviar item entregue.
-        console.log(`[sql2014-bridge] item já entregue ignorado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
+        console.log(`[sql2014-sync] item já entregue ignorado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
         continue;
       }
 
       // Balcão/mesa/cartão/delivery/encomenda/apartamento: mantém item principal no payload para não perder itens em pedidos mistos
       // (ex.: um item com status 64 e outro com status 0 no mesmo pedido).
-      console.log(`[sql2014-bridge] item com status entregue detectado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
+      console.log(`[sql2014-sync] item com status entregue detectado: externalId=${launchCode} item=${row.itemname || '?'} status=${rawItemStatusNum}`);
     } else if (itemStatus === 'cancelled') {
       current.hasCancelledItems = true;
     } else {
@@ -491,7 +534,7 @@ function groupRowsToOrders(rows) {
     const subItemValue = row.subitem ?? row.SubItem ?? row.SUBITEM ?? 0;
     const isInsumo = Number(subItemValue) > 0;
     if (isInsumo) {
-      console.log(`[sql2014-bridge] ignorando insumo: externalId=${launchCode} item=${row.itemname || row.produtodescricao || '?'} subItem=${subItemValue}`);
+      console.log(`[sql2014-sync] ignorando insumo: externalId=${launchCode} item=${row.itemname || row.produtodescricao || '?'} subItem=${subItemValue}`);
       continue;
     }
 
@@ -531,21 +574,29 @@ function groupRowsToOrders(rows) {
   });
 }
 
-async function loadState() {
+async function loadState(pool) {
   try {
     const content = await fs.readFile(STATE_FILE, 'utf8');
     const parsed = JSON.parse(content);
     const parsedLastSyncAt = parseUpdatedAt(parsed.lastSyncAt);
     const idMap = parsed.idMap || {};
     const hasMappedOrders = Object.keys(idMap).length > 0;
-    let lastSyncAt = parsedLastSyncAt ? parsedLastSyncAt.toISOString() : getInitialLastSyncAt();
+    let lastSyncAt = parsedLastSyncAt ? parsedLastSyncAt.toISOString() : await getInitialLastSyncAt(pool);
 
     // Proteção para ambiente novo/resetado: sem mapeamentos, nunca reprocessar histórico.
+    // Força para a hora do SQL Server (não do relógio local), mesmo que SQL2014_INITIAL_SYNC_AT
+    // esteja configurado, pois o objetivo aqui é sempre bloquear replay de histórico.
     if (SQL_DISALLOW_HISTORICAL_REPLAY && !hasMappedOrders) {
-      const forcedNow = new Date().toISOString();
-      if (!parsedLastSyncAt || parsedLastSyncAt.getTime() < Date.now() - 60000) {
+      let forcedNow;
+      try {
+        forcedNow = (await fetchServerNow(pool)).toISOString();
+      } catch (error) {
+        console.warn(`[sql2014-sync] falha ao obter hora do SQL Server, usando relógio local: ${error.message || error}`);
+        forcedNow = new Date().toISOString();
+      }
+      if (!parsedLastSyncAt || parsedLastSyncAt.getTime() < new Date(forcedNow).getTime() - 60000) {
         console.warn(
-          `[sql2014-bridge] replay historico bloqueado (state sem idMap). Ajustando lastSyncAt para agora: ${forcedNow}`
+          `[sql2014-sync] replay historico bloqueado (state sem idMap). Ajustando lastSyncAt para agora: ${forcedNow}`
         );
       }
       lastSyncAt = forcedNow;
@@ -559,8 +610,8 @@ async function loadState() {
       lastItemsSnapshotByExternalId: parsed.lastItemsSnapshotByExternalId || {},
     };
   } catch {
-    const initialLastSyncAt = getInitialLastSyncAt();
-    console.warn(`[sql2014-bridge] state file nao encontrado; iniciando lastSyncAt=${initialLastSyncAt}`);
+    const initialLastSyncAt = await getInitialLastSyncAt(pool);
+    console.warn(`[sql2014-sync] state file nao encontrado; iniciando lastSyncAt=${initialLastSyncAt}`);
     return {
       lastSyncAt: initialLastSyncAt,
       idMap: {},
@@ -590,6 +641,12 @@ async function buildChangeTokenQueryText() {
   return SQL_CHANGE_TOKEN_QUERY;
 }
 
+// Sentinela para "consultei e não há mudanças" (MAX(...) de um WHERE sem linhas retorna NULL).
+// Precisa ser distinto de `null`, que sinaliza "não consegui obter um token" (recordset vazio,
+// query mal configurada). Sem essa distinção, todo ciclo ocioso (o caso mais comum) caía no
+// fallback de rodar a query pesada completa a cada poll, martelando o SQL2014 do cliente.
+const NO_CHANGES_TOKEN = '__no_changes__';
+
 function extractChangeToken(result) {
   const rows = Array.isArray(result?.recordset) ? result.recordset : [];
   if (!rows.length) return null;
@@ -598,11 +655,11 @@ function extractChangeToken(result) {
   const firstValue = Object.values(row)[0];
   const rawValue = row.changetoken ?? row.token ?? row.maxupdatedat ?? row.updatedat ?? firstValue;
 
-  if (rawValue === undefined || rawValue === null) return null;
+  if (rawValue === undefined || rawValue === null) return NO_CHANGES_TOKEN;
   if (rawValue instanceof Date) return rawValue.toISOString();
 
   const textValue = String(rawValue).trim();
-  return textValue || null;
+  return textValue || NO_CHANGES_TOKEN;
 }
 
 async function getChangeToken(pool, state, changeTokenQueryText) {
@@ -733,7 +790,7 @@ async function createOrderInKds(row, options = {}) {
   const suppressPrint = shouldSuppressPrint(serviceMode);
   if (suppressPrint) {
     const modeLabel = serviceMode === '17' || serviceMode === '2' ? 'mesa' : 'cartao';
-    console.log(`[sql2014-bridge] pedido ${modeLabel} detectado: suppressAutoPrint=true`);
+    console.log(`[sql2014-sync] pedido ${modeLabel} detectado: suppressAutoPrint=true`);
   }
 
   // demandId vem do agrupamento SQL (estável por externalId + updatedAt).
@@ -788,7 +845,7 @@ async function safeUpdateOrderStatusInKds(kdsOrderId, status, context) {
     const message = String(error?.message || error || '');
     if (message.includes('invalid_status_transition')) {
       console.warn(
-        `[sql2014-bridge] transicao ignorada para evitar pulo de etapa: externalId=${context.externalId} kdsId=${kdsOrderId} target=${status}`
+        `[sql2014-sync] transicao ignorada para evitar pulo de etapa: externalId=${context.externalId} kdsId=${kdsOrderId} target=${status}`
       );
       return false;
     }
@@ -879,31 +936,31 @@ async function syncCycle(pool, state, queryText, options = {}) {
   const request = pool.request();
   request.input('lastSyncAt', sql.DateTime2, new Date(state.lastSyncAt));
 
-  console.log(`[sql2014-bridge] executando query com lastSyncAt=${state.lastSyncAt}`);
+  console.log(`[sql2014-sync] executando query com lastSyncAt=${state.lastSyncAt}`);
   let result;
   try {
     result = await request.query(queryText);
   } catch (sqlError) {
-    console.error('[sql2014-bridge] ERRO SQL:', sqlError.message || sqlError);
+    console.error('[sql2014-sync] ERRO SQL:', sqlError.message || sqlError);
     throw sqlError;
   }
 
   const rows = Array.isArray(result.recordset) ? result.recordset : [];
-  console.log(`[sql2014-bridge] query retornou ${rows.length} linhas`);
+  console.log(`[sql2014-sync] query retornou ${rows.length} linhas`);
   if (rows.length > 0) {
     const firstRow = rows[0];
-    console.log(`[sql2014-bridge] primeira linha: externalId=${firstRow.externalId} launchCode=${firstRow.launchCode} number=${firstRow.number} updatedAt=${firstRow.updatedAt}`);
-    console.log(`[sql2014-bridge] estrutura: serviceMode=${firstRow.serviceMode} tipoAtendimento=${firstRow.tipoAtendimento} sellerName=${firstRow.sellerName || 'null'}`);
+    console.log(`[sql2014-sync] primeira linha: externalId=${firstRow.externalId} launchCode=${firstRow.launchCode} number=${firstRow.number} updatedAt=${firstRow.updatedAt}`);
+    console.log(`[sql2014-sync] estrutura: serviceMode=${firstRow.serviceMode} tipoAtendimento=${firstRow.tipoAtendimento} sellerName=${firstRow.sellerName || 'null'}`);
   }
 
   const orders = groupRowsToOrders(rows);
-  console.log(`[sql2014-bridge] agrupado em ${orders.length} pedidos (demandas)`);
-  
+  console.log(`[sql2014-sync] agrupado em ${orders.length} pedidos (demandas)`);
+
   // Log dos primeiros pedidos para debug
   if (orders.length > 0) {
     orders.slice(0, 3).forEach(o => {
       const demandInfo = o.demandId ? ` demandId=${o.demandId}` : '';
-      console.log(`[sql2014-bridge] demanda ${o.externalId}${demandInfo}: itens=${o.items.length}, vendedor=${o.sellerName || 'null'}, atendimento=${o.attendant}, modo=${o.serviceMode}`);
+      console.log(`[sql2014-sync] demanda ${o.externalId}${demandInfo}: itens=${o.items.length}, vendedor=${o.sellerName || 'null'}, atendimento=${o.attendant}, modo=${o.serviceMode}`);
     });
   }
 
@@ -960,7 +1017,7 @@ async function syncCycle(pool, state, queryText, options = {}) {
     // mas ainda precisam aparecer no KDS (caso real: mesa 02 com pedidos 114898/114899).
     if (mappedStatus === 'delivered' && !kdsId) {
       if (!keepDeliveredOrderModes.has(mode)) {
-        console.log(`[sql2014-bridge] lançamento já entregue ignorado (nunca foi para KDS): externalId=${externalId} mode=${mode || 'desconhecido'}`);
+        console.log(`[sql2014-sync] lançamento já entregue ignorado (nunca foi para KDS): externalId=${externalId} mode=${mode || 'desconhecido'}`);
         // Avança o cursor mesmo assim para não reprocessar
         state.lastStatusByExternalId[syncKey] = 'delivered';
         state.lastItemsSnapshotByExternalId[externalId] = buildItemsSnapshot(currentItems);
@@ -968,7 +1025,7 @@ async function syncCycle(pool, state, queryText, options = {}) {
         continue;
       }
 
-      console.log(`[sql2014-bridge] lançamento entregue aceito para modo ${mode}: externalId=${externalId}`);
+      console.log(`[sql2014-sync] lançamento entregue aceito para modo ${mode}: externalId=${externalId}`);
     }
 
     // Para demanda nova da mesma comanda, cria card apenas quando houver item novo.
@@ -1052,7 +1109,7 @@ async function syncCycle(pool, state, queryText, options = {}) {
           reason: message.slice(0, 500),
         };
         skipped += 1;
-        console.warn(`[sql2014-bridge] pedido bloqueado para evitar replay: key=${syncKey} reason=${message}`);
+        console.warn(`[sql2014-sync] pedido bloqueado para evitar replay: key=${syncKey} reason=${message}`);
         continue;
       }
       throw error;
@@ -1071,11 +1128,21 @@ async function syncCycle(pool, state, queryText, options = {}) {
   };
 }
 
-// Índices que aceleram o filtro incremental (COALESCE ... > @lastSyncAt) das queries do bridge.
+// Índices que aceleram o filtro incremental (COALESCE ... > @lastSyncAt) e os JOINs da query.
 // Idempotente: seguro rodar em toda inicialização, em qualquer instalação de cliente.
+// Nomes de coluna conferidos contra o schema real (INFORMATION_SCHEMA.COLUMNS) de uma base
+// de cliente: as views vwLancamentos/vwPedidosProdutos expõem aliases (ClienteID, PedidoID,
+// ProdutoID, LancamentoID...) que NÃO existem nas tabelas base — lá os nomes reais são
+// Cliente, Pedido, Produto, Lancamento. Os índices precisam ir na tabela base com o nome real.
 const PERFORMANCE_INDEXES = [
   { name: 'IX_Lançamentos_DataDeEdição', table: 'dbo.Lançamentos', column: '[DataDeEdição]' },
   { name: 'IX_Pedidos_Produtos_DataDeEdição', table: 'dbo.Pedidos_Produtos', column: '[DataDeEdição]' },
+  { name: 'IX_Lançamentos_Cliente', table: 'dbo.Lançamentos', column: '[Cliente]' },
+  { name: 'IX_Lançamentos_Integradora', table: 'dbo.Lançamentos', column: '[Integradora]' },
+  // Chave do INNER JOIN principal entre as duas views — a mais valiosa das novas.
+  { name: 'IX_Pedidos_Produtos_Lancamento', table: 'dbo.Pedidos_Produtos', column: '[Lancamento]' },
+  { name: 'IX_Pedidos_Produtos_Pedido', table: 'dbo.Pedidos_Produtos', column: '[Pedido]' },
+  { name: 'IX_Pedidos_Produtos_Produto', table: 'dbo.Pedidos_Produtos', column: '[Produto]' },
 ];
 
 async function ensurePerformanceIndexes(pool) {
@@ -1089,149 +1156,179 @@ async function ensurePerformanceIndexes(pool) {
         CREATE NONCLUSTERED INDEX [${idx.name}]
         ON ${idx.table} (${idx.column});
       `);
-      console.log(`[sql2014-bridge] índice de performance ok: ${idx.name}`);
+      console.log(`[sql2014-sync] índice de performance ok: ${idx.name}`);
     } catch (err) {
       // Não bloqueia a sincronização de pedidos por falta de permissão de DDL no cliente.
-      console.warn(`[sql2014-bridge] não foi possível criar índice ${idx.name}:`, err.message || err);
+      console.warn(`[sql2014-sync] não foi possível criar índice ${idx.name}:`, err.message || err);
     }
   }
 }
 
 async function syncSectors(pool) {
   try {
-    const result = await pool.request().query('SELECT [C\u00f3digo], [Descri\u00e7\u00e3o] FROM Setores ORDER BY [C\u00f3digo]');
+    const result = await pool.request().query('SELECT [Código], [Descrição] FROM Setores ORDER BY [Código]');
     const rows = Array.isArray(result.recordset) ? result.recordset : [];
     if (!rows.length) return;
     const sectors = rows.map(r => ({
-      id: String(r['C\u00f3digo'] ?? r['CODIGO'] ?? r['codigo'] ?? '').trim(),
-      name: String(r['Descri\u00e7\u00e3o'] ?? r['DESCRICAO'] ?? r['descricao'] ?? r['Nome'] ?? r['NOME'] ?? r['nome'] ?? '').trim(),
+      id: String(r['Código'] ?? r['CODIGO'] ?? r['codigo'] ?? '').trim(),
+      name: String(r['Descrição'] ?? r['DESCRICAO'] ?? r['descricao'] ?? r['Nome'] ?? r['NOME'] ?? r['nome'] ?? '').trim(),
     })).filter(s => s.id);
     if (!sectors.length) return;
     await callKdsApi('/sectors/sync', {
       method: 'POST',
       body: JSON.stringify({ sectors }),
     });
-    console.log(`[sql2014-bridge] setores sincronizados: ${sectors.length}`);
+    console.log(`[sql2014-sync] setores sincronizados: ${sectors.length}`);
   } catch (err) {
-    console.warn('[sql2014-bridge] falha ao sincronizar setores:', err.message || err);
+    console.warn('[sql2014-sync] falha ao sincronizar setores:', err.message || err);
   }
 }
 
-async function validateConfig(queryText) {
+// Ponto de entrada único, chamado por server/index.js depois que o HTTP já está no ar.
+// Nunca lança/derruba o processo chamador: falta de configuração ou SQL2014 fora do ar
+// apenas desabilitam/atrasam a sincronização, sem afetar o resto do KDS.
+async function startSql2014Sync({ port } = {}) {
   const requiredSqlEnv = ['SQL2014_USER', 'SQL2014_PASSWORD', 'SQL2014_DATABASE'];
-  const missing = requiredSqlEnv.filter(name => !process.env[name]);
-  if (missing.length) {
-    throw new Error(`missing required env vars: ${missing.join(', ')}`);
+  const missingEnv = requiredSqlEnv.filter(name => !process.env[name]);
+  if (missingEnv.length) {
+    console.log(`[sql2014-sync] não configurado (faltam ${missingEnv.join(', ')}); sincronização com SQL2014 desabilitada`);
+    return () => {};
   }
+
+  KDS_API_BASE = String(process.env.KDS_API_BASE || `http://127.0.0.1:${port || process.env.PORT || 8081}`).replace(/\/$/, '');
+
+  let queryText;
+  let changeTokenQueryText;
+  try {
+    queryText = await buildQueryText();
+    changeTokenQueryText = await buildChangeTokenQueryText();
+  } catch (error) {
+    console.error('[sql2014-sync] falha ao carregar arquivo(s) de query:', error.message || error);
+    return () => {};
+  }
+
   if (!queryText || !queryText.trim()) {
-    throw new Error('configure SQL2014_QUERY or SQL2014_QUERY_FILE with a SELECT statement');
+    console.warn('[sql2014-sync] SQL2014_QUERY/SQL2014_QUERY_FILE não configurado; sincronização com SQL2014 desabilitada');
+    return () => {};
   }
 
-  if (SQL_CHANGE_TOKEN_ENABLED && !SQL_CHANGE_TOKEN_QUERY && !SQL_CHANGE_TOKEN_QUERY_FILE) {
-    throw new Error('SQL2014_CHANGE_TOKEN_ENABLED=true requires SQL2014_CHANGE_TOKEN_QUERY or SQL2014_CHANGE_TOKEN_QUERY_FILE');
-  }
-}
-
-async function main() {
-  acquireLock();
-
-  const queryText = await buildQueryText();
-  const changeTokenQueryText = await buildChangeTokenQueryText();
-  await validateConfig(queryText);
-
-  const state = await loadState();
-  const pool = await sql.connect(sqlConfig);
-
-  console.log('[sql2014-bridge] connected to SQL Server');
-  console.log(`[sql2014-bridge] using state file: ${STATE_FILE}`);
-  console.log(`[sql2014-bridge] polling every ${POLL_INTERVAL_MS} ms`);
-  if (SQL_IDLE_POLL_INTERVAL_MS > POLL_INTERVAL_MS) {
-    console.log(`[sql2014-bridge] idle polling every ${SQL_IDLE_POLL_INTERVAL_MS} ms when no changes are detected`);
-  }
-  if (SQL_CHANGE_TOKEN_ENABLED) {
-    console.log('[sql2014-bridge] lightweight change-token detection is enabled');
+  if (SQL_CHANGE_TOKEN_ENABLED && !changeTokenQueryText.trim()) {
+    console.warn('[sql2014-sync] SQL2014_CHANGE_TOKEN_ENABLED=true requer SQL2014_CHANGE_TOKEN_QUERY(_FILE); sincronização com SQL2014 desabilitada');
+    return () => {};
   }
 
-  // Garante os índices de performance no banco do cliente (idempotente, roda em toda inicialização).
-  await ensurePerformanceIndexes(pool);
+  let stopped = false;
+  let pool = null;
+  let sectorsIntervalHandle = null;
+  let pollTimeoutHandle = null;
 
-  // Sincroniza setores na inicializãção e depois a cada 5 minutos.
-  await syncSectors(pool);
-  setInterval(() => syncSectors(pool), 5 * 60 * 1000);
-
-  let isInitialCycle = true;
-  let lastChangeToken = null;
-  let noChangeStreak = 0;
-  let stopLoop = false;
-
-  const shutdown = () => {
-    stopLoop = true;
-    releaseLock();
-    process.exit(0);
+  const stop = () => {
+    stopped = true;
+    if (sectorsIntervalHandle) clearInterval(sectorsIntervalHandle);
+    if (pollTimeoutHandle) clearTimeout(pollTimeoutHandle);
+    if (pool) pool.close().catch(() => {});
   };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-  process.on('exit', releaseLock);
 
-  const runOnce = async () => {
-    let nextDelayMs = POLL_INTERVAL_MS;
-
-    try {
-      if (SQL_CHANGE_TOKEN_ENABLED) {
-        const token = await getChangeToken(pool, state, changeTokenQueryText);
-        if (token && token === lastChangeToken) {
-          noChangeStreak += 1;
-          nextDelayMs = SQL_IDLE_POLL_INTERVAL_MS;
-          if (noChangeStreak === 1 || noChangeStreak % 10 === 0) {
-            console.log(`[sql2014-bridge] no SQL changes detected; skipping heavy sync (streak=${noChangeStreak})`);
-          }
-          isInitialCycle = false;
-          return;
-        }
-
-        if (!token) {
-          console.warn('[sql2014-bridge] change-token query returned empty token; running full sync as fallback');
-        }
-      }
-
-      const result = await syncCycle(pool, state, queryText, {
-        suppressAutoPrint: isInitialCycle,
-      });
-
-      if (SQL_CHANGE_TOKEN_ENABLED) {
-        const tokenAfterSync = await getChangeToken(pool, state, changeTokenQueryText);
-        if (tokenAfterSync) {
-          lastChangeToken = tokenAfterSync;
-        }
-      }
-
-      if (result.processed === 0 && result.created === 0 && result.updated === 0 && result.skipped === 0) {
-        noChangeStreak += 1;
-        nextDelayMs = SQL_IDLE_POLL_INTERVAL_MS;
-      } else {
-        noChangeStreak = 0;
-      }
-
-      if (result.processed > 0 || result.skipped > 0) {
-        console.log(
-          `[sql2014-bridge] processed=${result.processed} created=${result.created} updated=${result.updated} skipped=${result.skipped} lastSyncAt=${result.lastSyncAt}`
-        );
-      }
-      isInitialCycle = false;
-    } catch (error) {
-      console.error('[sql2014-bridge] cycle failed:', error.message || error);
-      isInitialCycle = false;
-    } finally {
-      if (!stopLoop) {
-        setTimeout(runOnce, nextDelayMs);
+  (async () => {
+    let attempt = 0;
+    while (!stopped && !pool) {
+      try {
+        pool = await sql.connect(sqlConfig);
+      } catch (error) {
+        attempt += 1;
+        const delayMs = Math.min(60000, 5000 * Math.pow(2, attempt - 1));
+        console.warn(`[sql2014-sync] falha ao conectar no SQL Server (tentativa ${attempt}): ${error.message || error}. Nova tentativa em ${delayMs}ms`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
-  };
 
-  await runOnce();
+    if (stopped || !pool) return;
+
+    console.log('[sql2014-sync] connected to SQL Server');
+
+    const state = await loadState(pool);
+
+    console.log(`[sql2014-sync] using state file: ${STATE_FILE}`);
+    console.log(`[sql2014-sync] polling every ${POLL_INTERVAL_MS} ms`);
+    if (SQL_IDLE_POLL_INTERVAL_MS > POLL_INTERVAL_MS) {
+      console.log(`[sql2014-sync] idle polling every ${SQL_IDLE_POLL_INTERVAL_MS} ms when no changes are detected`);
+    }
+    if (SQL_CHANGE_TOKEN_ENABLED) {
+      console.log('[sql2014-sync] lightweight change-token detection is enabled');
+    }
+
+    // Garante os índices de performance no banco do cliente (idempotente, roda em toda inicialização).
+    await ensurePerformanceIndexes(pool);
+
+    // Sincroniza setores na inicialização e depois a cada 5 minutos.
+    await syncSectors(pool);
+    sectorsIntervalHandle = setInterval(() => syncSectors(pool), 5 * 60 * 1000);
+
+    let isInitialCycle = true;
+    let lastChangeToken = null;
+    let noChangeStreak = 0;
+
+    const runOnce = async () => {
+      let nextDelayMs = POLL_INTERVAL_MS;
+
+      try {
+        if (SQL_CHANGE_TOKEN_ENABLED) {
+          const token = await getChangeToken(pool, state, changeTokenQueryText);
+          if (token && token === lastChangeToken) {
+            noChangeStreak += 1;
+            nextDelayMs = SQL_IDLE_POLL_INTERVAL_MS;
+            if (noChangeStreak === 1 || noChangeStreak % 10 === 0) {
+              console.log(`[sql2014-sync] no SQL changes detected; skipping heavy sync (streak=${noChangeStreak})`);
+            }
+            isInitialCycle = false;
+            return;
+          }
+
+          if (!token) {
+            console.warn('[sql2014-sync] change-token query returned empty token; running full sync as fallback');
+          }
+        }
+
+        const result = await syncCycle(pool, state, queryText, {
+          suppressAutoPrint: isInitialCycle,
+        });
+
+        if (SQL_CHANGE_TOKEN_ENABLED) {
+          const tokenAfterSync = await getChangeToken(pool, state, changeTokenQueryText);
+          if (tokenAfterSync) {
+            lastChangeToken = tokenAfterSync;
+          }
+        }
+
+        if (result.processed === 0 && result.created === 0 && result.updated === 0 && result.skipped === 0) {
+          noChangeStreak += 1;
+          nextDelayMs = SQL_IDLE_POLL_INTERVAL_MS;
+        } else {
+          noChangeStreak = 0;
+        }
+
+        if (result.processed > 0 || result.skipped > 0) {
+          console.log(
+            `[sql2014-sync] processed=${result.processed} created=${result.created} updated=${result.updated} skipped=${result.skipped} lastSyncAt=${result.lastSyncAt}`
+          );
+        }
+        isInitialCycle = false;
+      } catch (error) {
+        console.error('[sql2014-sync] cycle failed:', error.message || error);
+        isInitialCycle = false;
+      } finally {
+        if (!stopped) {
+          pollTimeoutHandle = setTimeout(runOnce, nextDelayMs);
+        }
+      }
+    };
+
+    await runOnce();
+  })().catch(error => {
+    console.error('[sql2014-sync] fatal error:', error.message || error);
+  });
+
+  return stop;
 }
 
-main().catch(error => {
-  console.error('[sql2014-bridge] fatal error:', error.message || error);
-  process.exit(1);
-});
+module.exports = { startSql2014Sync };

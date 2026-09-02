@@ -3,7 +3,7 @@
 Este guia cobre a instalacao completa em um novo PC (Windows), incluindo:
 - frontend + backend
 - MongoDB
-- integracao SQL Server 2014 (bridge)
+- integracao SQL Server 2014
 - impressao automatica de senha de pedido
 - ajustes do arquivo `.env`
 
@@ -129,20 +129,16 @@ cd server
 npm start
 ```
 
-Terminal 2 (bridge SQL, se usar):
-
-```powershell
-cd server
-npm run bridge:sql2014
-```
-
-Terminal 3 (frontend dev, se necessario):
+Terminal 2 (frontend dev, se necessario):
 
 ```powershell
 npm run dev
 ```
 
-## 8. Integracao SQL Server 2014 (bridge)
+## 8. Integracao SQL Server 2014
+
+A sincronizacao com o SQL2014 roda dentro do proprio backend (nao existe mais um processo/exe
+separado para isso) — basta configurar as variaveis abaixo e subir o backend normalmente.
 
 No `server/.env`, configure:
 
@@ -155,11 +151,9 @@ SQL2014_DATABASE=NomeDoBanco
 SQL2014_ENCRYPT=false
 SQL2014_TRUST_CERT=true
 SQL2014_POLL_INTERVAL_MS=3000
-SQL2014_IDLE_POLL_INTERVAL_MS=15000
+SQL2014_IDLE_POLL_INTERVAL_MS=3000
 SQL2014_CHANGE_TOKEN_ENABLED=true
 SQL2014_CHANGE_TOKEN_QUERY_FILE=./sql2014-change-token-query.sql
-SQL2014_INITIAL_SYNC_AT=2026-03-28T00:00:00.000Z
-SQL2014_START_FROM_NOW=true
 SQL2014_STATE_FILE=.sql2014-bridge-state.json
 SQL2014_QUERY_FILE=./sql2014-gerencialbrunoinfo-query.sql
 SQL2014_STATUS_MODE=parity
@@ -169,9 +163,45 @@ KDS_AUTH_USERNAME=Admin
 KDS_AUTH_PASSWORD=masterkey
 ```
 
-`SQL2014_START_FROM_NOW=true` faz o bridge iniciar pelo horario atual quando o arquivo de estado ainda nao existe, evitando reimportar historico antigo.
+Sem arquivo de estado, a sincronizacao sempre inicia pelo horario atual do proprio SQL Server do cliente (consulta `GETDATE()`), nunca reimportando historico antigo. Para forcar reprocessamento manual a partir de uma data especifica, defina `SQL2014_INITIAL_SYNC_AT` (formato ISO, ex.: `2026-03-28T00:00:00.000Z`) — uso raro, so quando for realmente necessario.
 
-`SQL2014_CHANGE_TOKEN_ENABLED=true` ativa uma consulta leve de mudanca antes da consulta pesada. Se nao houver alteracao, o bridge pula o ciclo pesado e reduz consumo de CPU.
+`SQL2014_CHANGE_TOKEN_ENABLED=true` ativa uma consulta leve de mudanca antes da consulta pesada. Se nao houver alteracao, o backend pula o ciclo pesado e reduz consumo de CPU.
+
+### Excluir produtos que nao sao de cozinha (Servico, Taxa, Fabricacao, Grade, etc.)
+
+`SQL2014_EXCLUDED_PRODUCT_TYPES` (lista separada por virgula) exclui itens do KDS pelo codigo de `Produtos.Tipo` (coluna `productType` na query). `Tipo` e um codigo de 1 letra fixo do proprio sistema do caixa (nao e configuravel por cliente), entao o mapeamento abaixo — confirmado criando um produto de teste pra cada tipo e conferindo o codigo gravado — vale para qualquer instalacao:
+
+| Codigo | Significado |
+|---|---|
+| `A` | Taxa Adicional |
+| `B` | Beneficiamento |
+| `D` | Grade |
+| `F` | Fabricacao |
+| `G` | Taxa de Entrega |
+| `M` | Evento |
+| `Q` | Equivalente |
+| `R` | Perda |
+| `T` | Patrimonio |
+| `U` | Clube de Consumo |
+| `X` | Taxa de Servico |
+| `P` | Produto normal (NAO excluir) |
+
+Padrao no `.env.example`:
+
+```env
+SQL2014_EXCLUDED_PRODUCT_TYPES=A,B,D,F,G,M,Q,R,T,U,X
+```
+
+Servico e Material de Expediente nao tem codigo `Tipo` proprio nesse sistema (produtos de teste com esses nomes vieram gravados como `Tipo=P`, igual produto normal) — por isso ficam de fora da lista acima e continuam indo pro KDS normalmente.
+
+Se precisar redescobrir os codigos em outra instalacao (ex.: outro sistema de caixa, nao so validar), rode:
+
+```sql
+SELECT Tipo, COUNT(*) AS Qtde, MIN(Descrição) AS ExemploNome
+FROM Produtos
+GROUP BY Tipo
+ORDER BY Tipo;
+```
 
 ### Trocar apenas o banco consultado
 
@@ -216,7 +246,7 @@ PRINT_PEDIDO_IMPRESSORA=Nome Exato da Impressora no Windows
 
 1. `npm run test:db` em `server` retorna OK
 2. Backend sobe na porta `8081`
-3. Bridge conecta no SQL (`connected to SQL Server`)
+3. Backend conecta no SQL2014 (`connected to SQL Server`)
 4. Novo pedido aparece no KDS
 5. Cancelamento no caixa reflete no KDS
 6. Impressao automatica dispara no modo configurado
@@ -238,14 +268,6 @@ Get-Process -Id <PID>
 ```
 
 Pare processo antigo e reinicie.
-
-### Bridge nao inicia por lock
-
-Apague lock antigo:
-
-```powershell
-Remove-Item .\server\scripts\.sql2014-bridge.pid -ErrorAction SilentlyContinue
-```
 
 ### Impressora nao encontrada
 
@@ -270,28 +292,48 @@ npm run release:protected
 ```
 
 Isso gera a pasta `release/` com:
-- `kds-server.exe` (backend empacotado)
-- `kds-bridge.exe` (integracao SQL empacotada)
+- `kds-server.exe` (backend empacotado, ja inclui a sincronizacao com o SQL2014)
 - `dist/` (frontend compilado)
-- `scripts/*.sql` (queries do bridge)
+- `scripts/*.sql` (queries do SQL2014)
 - `.env.example`
-- `start-server.cmd`, `start-bridge.cmd`, `start-all.cmd`
+- `start-server.cmd`, `start-all.cmd` (rodar manualmente, com janela visivel)
+- `nssm.exe`, `install-service.cmd`, `uninstall-service.cmd` (rodar como Servico do Windows, recomendado)
 
 Passos no cliente:
 1. Copiar apenas a pasta `release/`.
 2. Criar `.env` a partir de `.env.example` na raiz da pasta `release`.
 3. Ajustar variaveis do ambiente (`MONGODB_URI`, SQL2014_*, etc.).
-4. Iniciar com `start-all.cmd` (ou separado).
+4. Iniciar (ver opcoes abaixo).
 
-Se o `.env` nao existir, os scripts `start-*.cmd` agora criam automaticamente o arquivo a partir de `.env.example`, mostram instrucoes e pausam para edicao.
+#### Opcao recomendada: instalar como Servico do Windows
+
+Sem janela visivel no PC do cliente, inicia sozinho no boot (mesmo sem ninguem logado) e reinicia sozinho se cair:
+
+1. Clique com o botao direito em `install-service.cmd` -> "Executar como administrador" (ou de um PowerShell/cmd elevado).
+2. O script cria o `.env` a partir do `.env.example` se ainda nao existir (edite antes de continuar) e registra o servico `FOX KDS Server`.
+3. Confira em `services.msc` -> "FOX KDS Server". Logs em `release\logs\service-out.log` / `service-err.log`.
+4. Para atualizar de versao: pare o servico (`uninstall-service.cmd` ou pelo `services.msc`), substitua os arquivos da pasta pela nova versao e rode `install-service.cmd` de novo (e idempotente — reinstala por cima sem duplicar).
+5. Para remover: `uninstall-service.cmd` (tambem como administrador).
+
+Usa o [NSSM](https://nssm.cc) (dominio publico) para registrar o `kds-server.exe` como servico, ja que um `.exe` comum nao sabe se comunicar com o Gerenciador de Servicos do Windows sozinho.
+
+#### Opcao alternativa: rodar manualmente (janela visivel)
+
+Util para debug/primeira configuracao — mostra o console em tempo real:
+
+```powershell
+start-all.cmd
+```
+
+Se o `.env` nao existir, `start-server.cmd` cria automaticamente o arquivo a partir de `.env.example` e mostra instrucoes. Se `kds-server.exe` encerrar com erro, `start-server.cmd` reinicia sozinho a cada 5s (log em `server-restart.log`).
 
 ### EXE abre e fecha na hora (release)
 
-As causas mais comuns sao configuracao ausente ou invalida no `.env`:
-- `kds-server.exe`: `MONGODB_URI` ausente/invalido ou MongoDB desligado.
-- `kds-bridge.exe`: `SQL2014_USER`, `SQL2014_PASSWORD` ou `SQL2014_DATABASE` ausentes.
+A causa mais comum e configuracao ausente ou invalida no `.env`:
+- `MONGODB_URI` ausente/invalido ou MongoDB desligado.
+- `SQL2014_USER`, `SQL2014_PASSWORD` ou `SQL2014_DATABASE` ausentes (nesse caso a sincronizacao com o SQL2014 so fica desabilitada com um aviso no log — nao derruba o `kds-server.exe`).
 
-Use `start-server.cmd` e `start-bridge.cmd` (nao clique direto no `.exe`) para ver a mensagem de erro e manter a janela aberta.
+Use `start-server.cmd` (nao clique direto no `.exe`) para ver a mensagem de erro e manter a janela aberta.
 
 Observacoes de seguranca:
 - Nao enviar pasta `src/`, `server/` e `.git` para cliente.

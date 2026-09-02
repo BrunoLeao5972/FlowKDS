@@ -21,6 +21,7 @@ const { createSaasRouter } = require('./saas/routes');
 const { startSyncWorker } = require('./saas/syncWorker');
 const { verifyAccessToken: verifySaasAccessToken } = require('./saas/auth');
 const { printPedido } = require('./services/pedidoPrinter');
+const { startSql2014Sync } = require('./services/sql2014Sync');
 
 const app = express();
 // Permite sobrescrever a porta via variável de ambiente.
@@ -2375,6 +2376,7 @@ async function start() {
     server.listen(PORT, HOST, () => {
       const ip = getLocalIp();
       console.log(`KDS server listening on http://${ip}:${PORT} (bind ${HOST})`);
+      startSql2014Sync({ port: PORT });
     });
   } catch (error) {
     console.error('Failed to start server:', error.message);

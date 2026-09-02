@@ -8,9 +8,7 @@
     "dev": "node index.js",
     "dev:watch": "nodemon index.js",
     "test:db": "node scripts/test-db-connection.js",
-    "bridge:sql2014": "node scripts/sql2014-kds-bridge.js",
-    "pack:server": "pkg index.js --targets node18-win-x64 --output ../release/kds-server.exe",
-    "pack:bridge": "pkg scripts/sql2014-kds-bridge.js --targets node18-win-x64 --output ../release/kds-bridge.exe"
+    "pack:server": "pkg index.js --targets node18-win-x64 --output ../release/kds-server.exe"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

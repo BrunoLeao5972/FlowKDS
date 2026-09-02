@@ -7,6 +7,31 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/spec
 
 ## [Unreleased]
 
+### Adicionado
+- **Instalação como Serviço do Windows**: `install-service.cmd`/`uninstall-service.cmd` (via NSSM, vendorizado em `vendor/nssm/`) registram o `kds-server.exe` como serviço — sem janela visível, inicia sozinho no boot e reinicia sozinho se cair. `start-server.cmd`/`start-all.cmd` continuam disponíveis para rodar manualmente (debug).
+- **`SQL2014_EXCLUDED_PRODUCT_TYPES`**: exclui itens do KDS pelo código de `Produtos.Tipo` (fixo do sistema de caixa, confirmado por teste): `A`=Taxa Adicional, `B`=Beneficiamento, `D`=Grade, `F`=Fabricação, `G`=Taxa de Entrega, `M`=Evento, `Q`=Equivalente, `R`=Perda, `T`=Patrimônio, `U`=Clube de Consumo, `X`=Taxa de Serviço. Padrão já ativado no `.env.example`. Serviço/Material de Expediente não têm código próprio (vêm como `Tipo=P`, produto normal) e continuam indo pro KDS.
+
+## [2.1.1] - 2026-07-27
+
+### Corrigido
+- **Causa raiz do disco do SQL Server em 100% contínuo**: as duas queries do SQL2014 (principal e a de detecção leve de mudanças) filtravam com `COALESCE(coluna_a, coluna_b, ...) > @lastSyncAt`. SQL Server não consegue usar índice em cima de uma expressão `COALESCE` (não é sargable) — confirmado via `SET SHOWPLAN_TEXT`, isso forçava um **Clustered Index Scan de `Pedidos_Produtos` inteira** a cada poll (a cada poucos segundos, o tempo todo, mesmo sem nenhum pedido novo). Reescritas para comparar cada coluna isoladamente com `OR`, permitindo `Index Seek` nos índices já existentes. Mesmo resultado (validado linha a linha contra a versão antiga), ordens de magnitude mais barato.
+- **Latência de ~10s até o pedido aparecer no KDS**: `SQL2014_IDLE_POLL_INTERVAL_MS` tinha piso de 15s, criado quando a checagem de ociosidade ainda era cara (item acima). Com a query sargable, o custo por poll é desprezível, então o padrão agora acompanha `SQL2014_POLL_INTERVAL_MS` (3s) — pedidos novos aparecem quase em tempo real de novo. Clientes já instalados precisam atualizar `SQL2014_IDLE_POLL_INTERVAL_MS` no `.env` (era 15000, recomendado 3000).
+
+## [2.1.0] - 2026-07-27
+
+### Alterado
+- A sincronização com o SQL2014 deixou de ser um processo/exe separado (`kds-bridge.exe`) e passou a rodar dentro do próprio `kds-server.exe`, chamando a API via loopback HTTP. Elimina o segundo `.exe`/`.cmd` e o risco de o cliente ficar com a sincronização travada silenciosamente por um `pause` de erro sem ninguém no PC pra apertar uma tecla.
+- `start-server.cmd` agora reinicia sozinho (a cada 5s, log em `server-restart.log`) se `kds-server.exe` encerrar com erro, em vez de pausar esperando input.
+- `SQL2014_START_FROM_NOW` foi removido: sem `SQL2014_INITIAL_SYNC_AT` configurado, a sincronização sempre inicia pelo horário atual do próprio SQL Server (`GETDATE()`), nunca reimportando histórico antigo — independente do relógio/fuso da máquina onde o backend roda.
+
+### Corrigido
+- Cursor de sincronização (`lastSyncAt`) deixou de ser calculado com `useUTC=true` (padrão do driver mssql), que deslocava o cursor pelo fuso horário local e podia bloquear pedidos novos por horas em clientes no Brasil.
+- Detecção leve de mudanças (`SQL2014_CHANGE_TOKEN_ENABLED`) deixou de rodar a query pesada em todo ciclo ocioso — o caso "sem mudanças" (mais comum) agora é distinguido corretamente de "erro/config ruim".
+
+### Adicionado
+- Mais índices de performance no SQL2014 do cliente (colunas de junção usadas pela query, conferidas contra o schema real): `Lançamentos.Cliente`, `Lançamentos.Integradora`, `Pedidos_Produtos.Lancamento`, `Pedidos_Produtos.Pedido`, `Pedidos_Produtos.Produto`.
+- `SQL2014_REQUEST_TIMEOUT_MS`/`SQL2014_CONNECTION_TIMEOUT_MS` (padrão 30s) para bancos de cliente mais lentos.
+
 ## [2.0.4] - 2026-04-22
 
 ### Corrigido

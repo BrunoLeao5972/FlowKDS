@@ -134,17 +134,19 @@ Opcional para reduzir consumo em PCs mais fracos (evita query pesada quando nada
 ```env
 SQL2014_CHANGE_TOKEN_ENABLED=true
 SQL2014_CHANGE_TOKEN_QUERY_FILE=./sql2014-change-token-query.sql
-SQL2014_IDLE_POLL_INTERVAL_MS=15000
+SQL2014_IDLE_POLL_INTERVAL_MS=3000
 ```
 
-Quando ativado, o bridge executa primeiro uma query leve de token de mudança. Se o token nao mudar, o ciclo pesado e pulado.
+Quando ativado, a sincronização executa primeiro uma query leve de token de mudança. Se o token nao mudar, o ciclo pesado e pulado.
 
-4. Execute o conector:
+4. A sincronização roda dentro do proprio backend (nao existe mais um processo separado) — basta iniciar o servidor normalmente:
 
 ```bash
 cd server
-npm run bridge:sql2014
+npm start
 ```
+
+Se as variaveis `SQL2014_USER`/`SQL2014_PASSWORD`/`SQL2014_DATABASE` nao estiverem configuradas, a sincronização com o SQL2014 fica desabilitada (log de aviso) sem afetar o resto do backend.
 
 Contrato da query
 

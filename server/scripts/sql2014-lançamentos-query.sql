@@ -47,6 +47,10 @@ SELECT
   CAST(pp.Status AS VARCHAR(20)) AS itemStatus,
   CAST(pp.SubItem AS INT) AS subItem,
   COALESCE(pp.Observacoes, '') AS itemNotes,
+  -- Tipo do produto (Produtos.Tipo, via vwProdutos.Tipo2): usado para excluir do KDS itens que
+  -- nao sao comida/bebida de cozinha (ex.: Servico, Taxa de Entrega, Fabricacao, Grade...).
+  -- Ver SQL2014_EXCLUDED_PRODUCT_TYPES no .env.
+  CAST(vp.Tipo2 AS VARCHAR(20)) AS productType,
   
   -- Descrição do Produto: prioriza apelido/nome de vwProdutos, depois descrição do item.
   COALESCE(
@@ -75,9 +79,15 @@ LEFT JOIN Integracao.Integradora ig ON ig.IntegradoraID = l.Integradora
   AND ABS(CONVERT(BIGINT, ig.Status)) % 2 = 0
 LEFT JOIN vwProdutos vp ON vp.ProdutoID = pp.ProdutoID
 
+-- Sargable: COALESCE(...) > @lastSyncAt impede o uso de indice (forca Clustered Index Scan
+-- da tabela inteira a cada execucao). Decomposto em comparacoes diretas por coluna para
+-- permitir Index Seek nos indices de DataDeEdição criados por ensurePerformanceIndexes.
 WHERE (
-  COALESCE(pp.Edicao, pp.Inclusao) > @lastSyncAt
-  OR COALESCE(l.Edicao, l.Inclusao, l.Emissao) > @lastSyncAt
+  pp.Edicao > @lastSyncAt
+  OR (pp.Edicao IS NULL AND pp.Inclusao > @lastSyncAt)
+  OR l.Edicao > @lastSyncAt
+  OR (l.Edicao IS NULL AND l.Inclusao > @lastSyncAt)
+  OR (l.Edicao IS NULL AND l.Inclusao IS NULL AND l.Emissao > @lastSyncAt)
 )
 
 ORDER BY 

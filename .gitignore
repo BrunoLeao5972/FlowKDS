@@ -33,6 +33,8 @@ public/fox not found.mp4
 dist-electron/
 *.rar
 *.exe
+# NSSM é vendorizado de propósito (domínio público) para instalar o KDS como serviço do Windows
+!vendor/nssm/nssm.exe
 
 # Environment / secrets - NUNCA versionar
 .env

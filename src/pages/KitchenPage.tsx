@@ -36,12 +36,16 @@ function MesaTableIcon(props: SVGProps<SVGSVGElement>) {
       strokeLinejoin="round"
       {...props}
     >
-      <path d="M4 9l4-4h8l4 4" />
-      <path d="M2 11h20" />
-      <path d="M4 11v9" />
-      <path d="M20 11v9" />
-      <path d="M8 11v6h3v-6" />
-      <path d="M16 11v6h-3v-6" />
+      {/* Tampo da Mesa */}
+      <rect x="3" y="7" width="18" height="4" rx="1" />
+
+      {/* Pernas da Frente */}
+      <path d="M 5 11 v 9" />
+      <path d="M 19 11 v 9" />
+
+      {/* Pernas de Trás (Menores para dar profundidade) */}
+      <path d="M 8 11 v 5" />
+      <path d="M 16 11 v 5" />
     </svg>
   );
 }

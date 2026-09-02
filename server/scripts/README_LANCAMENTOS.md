@@ -78,11 +78,12 @@ SQL2014_USER=sa
 SQL2014_PASSWORD=sisco12!@
 SQL2014_DATABASE=BD_ZERADO_SINCRONIZADO-FEV2026
 SQL2014_POLL_INTERVAL_MS=3000
-SQL2014_IDLE_POLL_INTERVAL_MS=15000
+SQL2014_IDLE_POLL_INTERVAL_MS=3000
 SQL2014_CHANGE_TOKEN_ENABLED=true
 SQL2014_CHANGE_TOKEN_QUERY_FILE=./sql2014-change-token-query.sql
-SQL2014_START_FROM_NOW=true
 ```
+
+Sem state file, a sincronização sempre começa do horário atual do SQL Server (via `GETDATE()`), nunca reimportando histórico antigo. Só defina `SQL2014_INITIAL_SYNC_AT` se quiser forçar reprocessamento manual a partir de uma data específica.
 
 ## KDS Frontend - Como Renderizar
 
@@ -107,13 +108,13 @@ Object.values(groupedByDemand).forEach(demand => {
 
 ### Problema: Pedidos não chegam
 1. Verificar `.sql2014-bridge-state.json` → `blockedExternalIds`
-2. Verificar logs: `[sql2014-bridge] query retornou X linhas`
+2. Verificar logs: `[sql2014-sync] query retornou X linhas`
 3. Verificar se `SQL2014_QUERY_FILE` aponta para `sql2014-lançamentos-query.sql`
 
 ### Problema: Dois lançamentos aparecem como um
 1. Verificar se `demandId` está sendo gerado corretamente
 2. Verificar se timestamps (`updatedAt`) são diferentes para cada lançamento
-3. Logs: `[sql2014-bridge] pedido: sellerName=..., attendant=..., serviceMode=...`
+3. Logs: `[sql2014-sync] pedido: sellerName=..., attendant=..., serviceMode=...`
 
 ### Problema: Setores errados ou itens faltando
 1. Verificar se `sectorId` vem preenchido na query
@@ -136,18 +137,18 @@ SQL2014_QUERY_FILE=./sql2014-lançamentos-query.sql
 
 ## Logs Esperados
 
-Ao iniciar o bridge com a nova query:
+Ao iniciar o backend com a nova query:
 ```
-[sql2014-bridge] executando query com lastSyncAt=...
-[sql2014-bridge] query retornou 42 linhas
-[sql2014-bridge] agrupado em 5 pedidos
-[sql2014-bridge] pedido LANÇAMENTO-123: sellerName=João, attendant=5, serviceMode=mesa
-[sql2014-bridge] pedido criado com demandId=LANÇAMENTO-123::2026-04-22T15:17:00.000Z
+[sql2014-sync] executando query com lastSyncAt=...
+[sql2014-sync] query retornou 42 linhas
+[sql2014-sync] agrupado em 5 pedidos
+[sql2014-sync] pedido LANÇAMENTO-123: sellerName=João, attendant=5, serviceMode=mesa
+[sql2014-sync] pedido criado com demandId=LANÇAMENTO-123::2026-04-22T15:17:00.000Z
 ```
 
 ## Referências
 
-- Bridge: `server/scripts/sql2014-kds-bridge.js`
+- Sincronização SQL2014: `server/services/sql2014Sync.js` (roda dentro do `server/index.js`, sem processo separado)
 - Query: `server/scripts/sql2014-lançamentos-query.sql`
 - Estado: `server/scripts/.sql2014-bridge-state.json`
 - API: `server/index.js` → `/orders` endpoint

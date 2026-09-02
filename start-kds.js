@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Script de inicialização completa do KDS
- * Inicia tanto o servidor Express quanto o worker de sincronização SQL2014
+ * A sincronização com o SQL2014 roda dentro do próprio servidor Express (server/services/sql2014Sync.js).
  */
 import { spawn } from 'child_process';
 import path from 'path';
@@ -53,11 +53,6 @@ function startProcess(name, command, args, cwd = SERVER_DIR) {
 
   child.on('exit', (code) => {
     log(`⚠️ ${name} encerrado com código ${code}`);
-    if (name.includes('Bridge')) {
-      // Bridge SQL e critico para ingestao; tenta auto-recuperacao.
-      log('Tentando reiniciar em 5 segundos...');
-      setTimeout(() => startProcess(name, command, args, cwd), 5000);
-    }
   });
 
   return child;
@@ -85,15 +80,6 @@ function main() {
     process.execPath,
     [path.join(SERVER_DIR, 'index.js')]
   );
-
-  // Aguarda o server subir antes de iniciar a ponte SQL para reduzir erro de bootstrap.
-  setTimeout(() => {
-    startProcess(
-      'KDS Bridge (SQL2014 Sync)',
-      process.execPath,
-      [path.join(SERVER_DIR, 'scripts', 'sql2014-kds-bridge.js')]
-    );
-  }, 2000);
 }
 
 main();
