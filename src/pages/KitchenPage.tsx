@@ -310,6 +310,10 @@ export default function KitchenPage() {
   function getEffectiveItemStatus(order: Order, item: OrderItem): ItemStatus {
     if (order.status === 'received') return item.itemStatus ?? 'waiting';
     if (order.status === 'ready') return 'ready';
+    // Pedido marcado "preparing" fora da Cozinha (ex.: painel Admin) não seta itemStatus por
+    // item — sem este caso, o fallback abaixo tratava os itens como "waiting" e a aba de setor
+    // continuava oferecendo "INICIAR PREPARO" mesmo com o pedido já em preparo.
+    if (order.status === 'preparing') return item.itemStatus ?? 'preparing';
     return item.itemStatus ?? 'waiting';
   }
 

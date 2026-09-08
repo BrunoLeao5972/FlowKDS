@@ -25,7 +25,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 /**
  * Props recebidas pelo ConfigDialog.
  * onSave é chamado quando o usuário clica em Ok e a validação passa.
- * ThemeToggle é o componente de alternância de tema injetado pelo AppNav.
  */
 interface ConfigDialogProps {
   tempoMedio: number;
@@ -56,7 +55,6 @@ interface ConfigDialogProps {
     panelCallEnabled: boolean,
     autoPrep: boolean
   ) => void;
-  ThemeToggle: React.ReactNode;
   orderNumberMode: 'continuous' | 'daily-reset' | 'custom-start';
   customStartNumber: number;
   enabledServiceModes: ServiceMode[];
@@ -179,7 +177,7 @@ interface OperationalReportData {
   };
 }
 
-export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, panelColor, orderNumberMode, customStartNumber, enabledServiceModes, panelEnabledServiceModes, onSave, ThemeToggle }: ConfigDialogProps) {
+export default function ConfigDialog({ tempoMedio, tempoCritico, tempoAlerta, panelColor, orderNumberMode, customStartNumber, enabledServiceModes, panelEnabledServiceModes, onSave }: ConfigDialogProps) {
   // Controla qual aba está ativa na navegação principal
   const [activeTab, setActiveTab] = useState<'restaurant' | 'users'>('restaurant');
 

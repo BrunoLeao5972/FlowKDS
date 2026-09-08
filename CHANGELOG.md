@@ -7,15 +7,33 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/lang/pt-BR/spec
 
 ## [Unreleased]
 
+## [2.1.4] - 2026-09-01
+
+### Corrigido
+- **Pedido marcado "Em preparo" pelo Admin não refletia na Cozinha (aba de setor)**: `KitchenPage.tsx` tinha sua própria cópia de `getEffectiveItemStatus`, diferente da usada no Admin, sem tratar o caso `order.status === 'preparing'`. Como o Admin muda o status do pedido sem tocar no `itemStatus` de cada item, a Cozinha calculava (por engano) que todos os itens ainda estavam "waiting" — e a aba de setor continuava oferecendo "INICIAR PREPARO", exigindo um clique redundante. Corrigido para tratar `preparing` igual ao Admin.
+
+## [2.1.3] - 2026-09-01
+
+### Alterado
+- Painel de chamada (`/display`): emojis dos cabeçalhos "EM PREPARO" (🔥) e "PRONTOS PARA RETIRADA" (✅) trocados por ícones vetorizados (`Flame`/`CircleCheckBig`, lucide-react), mesma linha do ícone de sino já usado em "RETIRE NO BALCÃO".
+
+## [2.1.2] - 2026-09-01
+
+### Corrigido
+- **KDS ainda sincronizava pedidos antigos ao reiniciar**: o cursor de sincronização (`lastSyncAt`) era retomado do `state.json` salvo da execução anterior. Se o serviço tivesse ficado parado por um tempo (manutenção, queda, etc.), ao voltar ele tentava "recuperar o atraso" inteiro. Agora todo boot da API recalcula o cursor a partir de agora (`GETDATE()` do SQL Server), nunca retoma o valor salvo — pedidos criados enquanto a API estava fora do ar não aparecem retroativamente. **Atenção**: se algum cliente ainda tem `SQL2014_INITIAL_SYNC_AT` descomentado no `.env` (linha antiga, herdada de versões anteriores a este release — `.env.example` trazia ela ativa por padrão até aqui), esse valor manual continua tendo prioridade sobre "agora" e precisa ser comentado/removido nesse `.env` pra este fix funcionar.
+
 ### Adicionado
-- **Instalação como Serviço do Windows**: `install-service.cmd`/`uninstall-service.cmd` (via NSSM, vendorizado em `vendor/nssm/`) registram o `kds-server.exe` como serviço — sem janela visível, inicia sozinho no boot e reinicia sozinho se cair. `start-server.cmd`/`start-all.cmd` continuam disponíveis para rodar manualmente (debug).
-- **`SQL2014_EXCLUDED_PRODUCT_TYPES`**: exclui itens do KDS pelo código de `Produtos.Tipo` (fixo do sistema de caixa, confirmado por teste): `A`=Taxa Adicional, `B`=Beneficiamento, `D`=Grade, `F`=Fabricação, `G`=Taxa de Entrega, `M`=Evento, `Q`=Equivalente, `R`=Perda, `T`=Patrimônio, `U`=Clube de Consumo, `X`=Taxa de Serviço. Padrão já ativado no `.env.example`. Serviço/Material de Expediente não têm código próprio (vêm como `Tipo=P`, produto normal) e continuam indo pro KDS.
+- **Botão de modo claro/escuro no Admin e na Cozinha**: o toggle (`ThemeToggle`) e o CSS de ambos os modos já existiam (usados no painel de chamada via um atalho de teclado escondido), mas nunca tinham sido colocados visíveis em lugar nenhum. Agora aparece na barra de navegação, junto com o nome do usuário/Sair — funciona em `/` (Admin) e `/kitchen` (Cozinha) automaticamente, já que os dois compartilham a mesma barra.
 
 ## [2.1.1] - 2026-07-27
 
 ### Corrigido
 - **Causa raiz do disco do SQL Server em 100% contínuo**: as duas queries do SQL2014 (principal e a de detecção leve de mudanças) filtravam com `COALESCE(coluna_a, coluna_b, ...) > @lastSyncAt`. SQL Server não consegue usar índice em cima de uma expressão `COALESCE` (não é sargable) — confirmado via `SET SHOWPLAN_TEXT`, isso forçava um **Clustered Index Scan de `Pedidos_Produtos` inteira** a cada poll (a cada poucos segundos, o tempo todo, mesmo sem nenhum pedido novo). Reescritas para comparar cada coluna isoladamente com `OR`, permitindo `Index Seek` nos índices já existentes. Mesmo resultado (validado linha a linha contra a versão antiga), ordens de magnitude mais barato.
 - **Latência de ~10s até o pedido aparecer no KDS**: `SQL2014_IDLE_POLL_INTERVAL_MS` tinha piso de 15s, criado quando a checagem de ociosidade ainda era cara (item acima). Com a query sargable, o custo por poll é desprezível, então o padrão agora acompanha `SQL2014_POLL_INTERVAL_MS` (3s) — pedidos novos aparecem quase em tempo real de novo. Clientes já instalados precisam atualizar `SQL2014_IDLE_POLL_INTERVAL_MS` no `.env` (era 15000, recomendado 3000).
+
+### Adicionado
+- **Instalação como Serviço do Windows**: `install-service.cmd`/`uninstall-service.cmd` (via NSSM, vendorizado em `vendor/nssm/`) registram o `kds-server.exe` como serviço — sem janela visível, inicia sozinho no boot e reinicia sozinho se cair. `start-server.cmd`/`start-all.cmd` continuam disponíveis para rodar manualmente (debug).
+- **`SQL2014_EXCLUDED_PRODUCT_TYPES`**: exclui itens do KDS pelo código de `Produtos.Tipo` (fixo do sistema de caixa, confirmado por teste): `A`=Taxa Adicional, `B`=Beneficiamento, `D`=Grade, `F`=Fabricação, `G`=Taxa de Entrega, `M`=Evento, `Q`=Equivalente, `R`=Perda, `T`=Patrimônio, `U`=Clube de Consumo, `X`=Taxa de Serviço. Padrão já ativado no `.env.example`. Serviço/Material de Expediente não têm código próprio (vêm como `Tipo=P`, produto normal) e continuam indo pro KDS.
 
 ## [2.1.0] - 2026-07-27
 

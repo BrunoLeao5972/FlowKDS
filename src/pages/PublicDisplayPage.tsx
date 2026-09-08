@@ -3,7 +3,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useSettings, ServiceMode } from '@/contexts/SettingsContext';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bell } from 'lucide-react';
+import { Bell, Flame, CircleCheckBig } from 'lucide-react';
 import { getDisplayCustomerName, getPanelCustomerName } from '@/lib/customerName';
 
 const RECENT_WINDOW_HOURS = 3;
@@ -327,7 +327,8 @@ function PublicDisplayContent() {
             className="text-xl md:text-2xl font-black mb-4 flex items-center justify-center gap-2"
             style={{ color: isDarkMode ? 'var(--color-warning)' : 'var(--color-primary)' }}
           >
-            🔥 EM PREPARO
+            <Flame className="w-5 h-5" />
+            EM PREPARO
           </h2>
           <div className="grid grid-cols-2 gap-2 content-start">
             <AnimatePresence>
@@ -370,7 +371,8 @@ function PublicDisplayContent() {
         {/* Coluna direita — Prontos para Retirada */}
         <div className="md:pl-6 pt-4 md:pt-0 flex flex-col">
           <h2 className="text-xl md:text-2xl font-black mb-4 flex items-center justify-center gap-2" style={{ color: '#16a34a' }}>
-            ✅ PRONTOS PARA RETIRADA
+            <CircleCheckBig className="w-5 h-5" />
+            PRONTOS PARA RETIRADA
           </h2>
 
           {queueOrders.length === 0 && (

@@ -27,7 +27,6 @@ const SQL_CHANGE_TOKEN_QUERY = process.env.SQL2014_CHANGE_TOKEN_QUERY || '';
 const SQL_CHANGE_TOKEN_ENABLED = toBool(getEnv('SQL2014_CHANGE_TOKEN_ENABLED', 'false'), false);
 const SQL_STATUS_MODE = String(process.env.SQL2014_STATUS_MODE || 'parity').trim().toLowerCase();
 const SQL_SYNC_OVERLAP_MS = Math.max(0, Number(getEnv('SQL2014_SYNC_OVERLAP_MS', '1000')) || 0);
-const SQL_DISALLOW_HISTORICAL_REPLAY = toBool(getEnv('SQL2014_DISALLOW_HISTORICAL_REPLAY', 'true'), true);
 // Antes da query de change-token virar sargable (ver sql2014-change-token-query.sql), esse
 // piso ficava em 15s pra evitar bater com frequencia numa consulta cara (Clustered Index Scan).
 // Agora que ela usa Index Seek, o custo por poll e desprezivel, entao o padrao acompanha o
@@ -578,29 +577,16 @@ async function loadState(pool) {
   try {
     const content = await fs.readFile(STATE_FILE, 'utf8');
     const parsed = JSON.parse(content);
-    const parsedLastSyncAt = parseUpdatedAt(parsed.lastSyncAt);
     const idMap = parsed.idMap || {};
-    const hasMappedOrders = Object.keys(idMap).length > 0;
-    let lastSyncAt = parsedLastSyncAt ? parsedLastSyncAt.toISOString() : await getInitialLastSyncAt(pool);
 
-    // Proteção para ambiente novo/resetado: sem mapeamentos, nunca reprocessar histórico.
-    // Força para a hora do SQL Server (não do relógio local), mesmo que SQL2014_INITIAL_SYNC_AT
-    // esteja configurado, pois o objetivo aqui é sempre bloquear replay de histórico.
-    if (SQL_DISALLOW_HISTORICAL_REPLAY && !hasMappedOrders) {
-      let forcedNow;
-      try {
-        forcedNow = (await fetchServerNow(pool)).toISOString();
-      } catch (error) {
-        console.warn(`[sql2014-sync] falha ao obter hora do SQL Server, usando relógio local: ${error.message || error}`);
-        forcedNow = new Date().toISOString();
-      }
-      if (!parsedLastSyncAt || parsedLastSyncAt.getTime() < new Date(forcedNow).getTime() - 60000) {
-        console.warn(
-          `[sql2014-sync] replay historico bloqueado (state sem idMap). Ajustando lastSyncAt para agora: ${forcedNow}`
-        );
-      }
-      lastSyncAt = forcedNow;
-    }
+    // O KDS deve sincronizar só pedidos a partir do momento em que a API é iniciada — nunca
+    // "retomar" um cursor antigo salvo de uma execução anterior (ex.: serviço que ficou parado
+    // por dias). Por isso lastSyncAt NUNCA é lido do state file, é sempre recalculado no boot
+    // (getInitialLastSyncAt: hora do SQL Server via GETDATE(), a menos que
+    // SQL2014_INITIAL_SYNC_AT esteja configurado para um reprocessamento manual deliberado).
+    // idMap/lastStatusByExternalId/etc. continuam vindo do arquivo — isso só afeta o cursor.
+    const lastSyncAt = await getInitialLastSyncAt(pool);
+    console.log(`[sql2014-sync] cursor iniciado a partir de agora (ignora lastSyncAt salvo anteriormente): ${lastSyncAt}`);
 
     return {
       lastSyncAt,

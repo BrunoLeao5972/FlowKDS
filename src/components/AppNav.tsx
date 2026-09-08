@@ -156,6 +156,7 @@ export function AppNav() {
             </button>
           )}
           <div className="ml-auto" />
+          <ThemeToggle />
           <span className="text-sm text-muted-foreground ml-3 hidden sm:inline">{displayUsername}</span>
           <button
             className="ml-2 inline-flex items-center gap-2 px-2 sm:px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
@@ -256,7 +257,6 @@ export function AppNav() {
             if (orderMode === 'daily-reset' || orderMode === 'custom-start') touchResetDate();
             setShowConfig(false);
           }}
-          ThemeToggle={<ThemeToggle />}
           enabledServiceModes={enabledServiceModes}
           panelEnabledServiceModes={panelEnabledServiceModes}
           autoPrep={autoPrep}
